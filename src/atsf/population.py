@@ -28,13 +28,18 @@ def strategy_id(strategy: StrategySpec) -> str:
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
     """Apply one constrained mutation and preserve genealogy."""
     mutation = rng.choice((mutate_indicator_period, mutate_threshold))
-    strategy = mutation(candidate.strategy, rng)
+    try:
+        strategy = mutation(candidate.strategy, rng)
+        operator = mutation.__name__
+    except (TypeError, ValueError):
+        strategy = mutate_indicator_period(candidate.strategy, rng)
+        operator = mutate_indicator_period.__name__
     candidate_id = strategy_id(strategy)
     lineage = LineageRecord(
         strategy_id=candidate_id,
         generation=candidate.lineage.generation + 1,
         parent_ids=(candidate.strategy_id,),
-        operator=mutation.__name__,
+        operator=operator,
     )
     return Candidate(strategy=strategy, strategy_id=candidate_id, lineage=lineage)
 
