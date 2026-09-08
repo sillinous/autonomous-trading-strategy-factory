@@ -1,7 +1,7 @@
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
-from atsf.strategy import Comparator, Condition, Indicator, Signal, StrategySpec
+from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
 
 
 def make_strategy() -> StrategySpec:
@@ -13,6 +13,8 @@ def make_strategy() -> StrategySpec:
         indicators=[Indicator(name="sma", source="close", period=5)],
         entry=Signal(all=[Condition(left="close", comparator=Comparator.GT, right="sma")]),
         exit=Signal(all=[Condition(left="close", comparator=Comparator.LT, right="sma")]),
+        position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
+        risk=RiskLimits(max_position=0.5),
     )
 
 
