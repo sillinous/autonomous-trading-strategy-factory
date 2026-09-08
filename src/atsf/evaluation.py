@@ -26,6 +26,8 @@ class WalkForwardEvaluation:
     oos_return: float
     oos_sharpe: float
     oos_drawdown: float
+    oos_equity: pd.Series | None = None
+    oos_trade_returns: tuple[float, ...] = ()
 
 
 def _position_signal(entry: pd.Series, exit_: pd.Series) -> pd.Series:
@@ -77,6 +79,7 @@ def evaluate_walk_forward(
 
     evaluations: list[SegmentEvaluation] = []
     oos_returns: list[pd.Series] = []
+    oos_trade_returns: list[float] = []
     all_passed = True
     for window in windows:
         train = _evaluate_segment(
@@ -96,6 +99,7 @@ def evaluate_walk_forward(
             and test.fitness.eligible
         )
         oos_returns.append(test.backtest.equity.pct_change().fillna(0.0))
+        oos_trade_returns.extend(test.backtest.trade_returns)
 
     combined_oos = pd.concat(oos_returns).sort_index()
     oos_equity = (1.0 + combined_oos).cumprod()
@@ -106,4 +110,6 @@ def evaluate_walk_forward(
         oos_return=float(oos_equity.iloc[-1] - 1.0),
         oos_sharpe=oos_validation.sharpe,
         oos_drawdown=oos_validation.drawdown,
+        oos_equity=oos_equity,
+        oos_trade_returns=tuple(oos_trade_returns),
     )
