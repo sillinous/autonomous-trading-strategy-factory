@@ -10,7 +10,7 @@ def test_paper_broker_applies_slippage_and_fees():
     assert fill.price == pytest.approx(100.2)
     assert fill.fee == pytest.approx(0.501)
     assert broker.position == 5
-    assert broker.cash == pytest.approx(499.499)
+    assert broker.cash == pytest.approx(498.499)
 
 
 def test_paper_broker_rejects_oversized_sell():
