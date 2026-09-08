@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -226,8 +227,11 @@ class ExperimentRegistry:
         if not members:
             raise ValueError("portfolio must have members")
         payload = json.dumps(definition, sort_keys=True, allow_nan=False)
-        if any(weight < 0 or not isinstance(weight, (int, float)) for weight in members.values()):
-            raise ValueError("portfolio weights must be non-negative numbers")
+        if any(
+            not isinstance(weight, (int, float)) or not math.isfinite(weight) or weight < 0
+            for weight in members.values()
+        ):
+            raise ValueError("portfolio weights must be finite and non-negative numbers")
         if sum(members.values()) > 1.0 + 1e-12:
             raise ValueError("portfolio weights exceed 100%")
         with self._connection:
@@ -254,8 +258,11 @@ class ExperimentRegistry:
             "SELECT strategy_id, weight FROM portfolio_members WHERE portfolio_id = ? ORDER BY rank",
             (portfolio_id,),
         ).fetchall()
-        return {"portfolio_id": portfolio_id, "definition": json.loads(row["definition_json"]),
-                "members": {item["strategy_id"]: item["weight"] for item in members}}
+        return {
+            "portfolio_id": portfolio_id,
+            "definition": json.loads(row["definition_json"]),
+            "members": {item["strategy_id"]: item["weight"] for item in members},
+        }
 
     def save_portfolio_run(
         self,
@@ -268,6 +275,10 @@ class ExperimentRegistry:
     ) -> None:
         if not math.isfinite(final_equity):
             raise ValueError("final_equity must be finite")
+        if self._connection.execute(
+            "SELECT 1 FROM portfolios WHERE portfolio_id = ?", (portfolio_id,)
+        ).fetchone() is None:
+            raise ValueError(f"unknown portfolio: {portfolio_id}")
         with self._connection:
             self._connection.execute(
                 """INSERT OR REPLACE INTO portfolio_runs
@@ -281,7 +292,12 @@ class ExperimentRegistry:
                 (run_id, strategy_id, return_contribution, risk_contribution)
                 VALUES (?, ?, ?, ?)""",
                 [
-                    (run_id, item["strategy_id"], item["return_contribution"], item["risk_contribution"])
+                    (
+                        run_id,
+                        item["strategy_id"],
+                        item["return_contribution"],
+                        item["risk_contribution"],
+                    )
                     for item in attribution
                 ],
             )
