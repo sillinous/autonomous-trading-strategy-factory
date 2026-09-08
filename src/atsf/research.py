@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from .data import dataset_identity
+from .experiment import ExperimentSpec
 from .fitness import FitnessPolicy
 from .population import Candidate, seed_population
 from .registry import ExperimentRegistry
@@ -63,7 +64,13 @@ def run_research(
             )
             results.append(result)
             for evaluation in result.evaluations:
-                store.save_experiment(evaluation.experiment, evaluation.experiment)
+                spec = ExperimentSpec(
+                    evaluation.candidate.strategy,
+                    identity.dataset_id,
+                    identity.version,
+                    seed + generation,
+                )
+                store.save_experiment(spec, evaluation.experiment)
             for candidate in result.next_population:
                 store.save_strategy(candidate.strategy)
                 store.save_lineage(candidate.lineage)
