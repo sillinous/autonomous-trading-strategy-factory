@@ -32,8 +32,10 @@ def allocate_inverse_volatility(
         raise ValueError("max_total_weight must be in (0, 1]")
     if policy.min_weight < 0:
         raise ValueError("min_weight cannot be negative")
-    if not policy.min_weight <= policy.max_weight <= policy.max_total_weight:
-        raise ValueError("weights must satisfy min_weight <= max_weight <= max_total_weight")
+    if policy.max_weight < policy.min_weight or policy.max_weight <= 0:
+        raise ValueError("max_weight must be positive and at least min_weight")
+    if policy.min_weight * len(strategy_ids) > policy.max_total_weight:
+        raise ValueError("minimum weights exceed total exposure")
     if policy.volatility_floor <= 0 or not math.isfinite(policy.volatility_floor):
         raise ValueError("volatility_floor must be positive and finite")
     if len(set(strategy_ids)) != len(strategy_ids):
