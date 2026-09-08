@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from random import Random
+from statistics import median
 from typing import Callable
 
 from .generator import mutate_indicator_period, mutate_threshold
+from .population import strategy_id
 from .strategy import StrategySpec
 
 
@@ -30,8 +33,6 @@ def evaluate_parameter_perturbations(
     if not strategy.indicators:
         raise ValueError("strategy must contain indicators")
 
-    from .population import strategy_id
-
     rng = Random(seed)
     mutations = (mutate_indicator_period, mutate_threshold)
     scores: list[float] = []
@@ -42,17 +43,18 @@ def evaluate_parameter_perturbations(
             candidate = mutation(strategy, rng)
         except (TypeError, ValueError):
             candidate = mutate_indicator_period(strategy, rng)
-        scores.append(float(evaluator(candidate)))
+        score = float(evaluator(candidate))
+        scores.append(score)
         ids.append(strategy_id(candidate))
 
-    finite_scores = [score for score in scores if score == score and abs(score) != float("inf")]
+    finite_scores = [score for score in scores if isfinite(score)]
     if not finite_scores:
         raise ValueError("evaluator produced no finite scores")
     return PerturbationResult(
         samples=samples,
         seed=seed,
-        pass_rate=sum(score >= 0 for score in finite_scores) / len(finite_scores),
+        pass_rate=sum(isfinite(score) and score >= 0 for score in scores) / samples,
         worst_score=min(finite_scores),
-        median_score=sorted(finite_scores)[len(finite_scores) // 2],
+        median_score=float(median(finite_scores)),
         strategy_ids=tuple(ids),
     )
