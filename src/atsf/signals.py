@@ -73,14 +73,13 @@ def _compare(
         return left <= right
     if comparator == Comparator.EQ:
         return left == right
-    if not isinstance(right, pd.Series):
-        raise ValueError(f"{comparator.value} requires a series right operand")
+    right_series = right if isinstance(right, pd.Series) else pd.Series(right, index=left.index)
     previous_left = left.shift(1)
-    previous_right = right.shift(1)
+    previous_right = right_series.shift(1)
     if comparator == Comparator.CROSSES_ABOVE:
-        return (left > right) & (previous_left <= previous_right)
+        return (left > right_series) & (previous_left <= previous_right)
     if comparator == Comparator.CROSSES_BELOW:
-        return (left < right) & (previous_left >= previous_right)
+        return (left < right_series) & (previous_left >= previous_right)
     raise ValueError(f"unsupported comparator: {comparator.value}")
 
 
