@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .lifecycle import StrategyLifecycle, StrategyState
+from .lifecycle import StrategyState
 from .registry import ExperimentRegistry
 
 
