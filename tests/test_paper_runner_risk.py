@@ -1,7 +1,15 @@
 import pandas as pd
 
 from atsf.paper_runner import run_paper_strategy
-from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
+from atsf.strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 
 def make_strategy(max_drawdown=None):
