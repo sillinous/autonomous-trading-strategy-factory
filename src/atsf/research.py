@@ -63,7 +63,7 @@ def run_research(
             )
             results.append(result)
             for evaluation in result.evaluations:
-                store.save_experiment(evaluation.experiment, evaluation.experiment_result)
+                store.save_experiment(evaluation.experiment, evaluation.experiment)
             for candidate in result.next_population:
                 store.save_strategy(candidate.strategy)
                 store.save_lineage(candidate.lineage)
