@@ -47,6 +47,16 @@ def run_paper_strategy(
         snapshots.append(snapshot)
         if not risk.check(snapshot.equity):
             break
+
+    # Paper runs use an explicit end-of-sample liquidation so final equity is
+    # fully realized and trade statistics are not dependent on an open position.
+    if snapshots and broker.position > 0 and not risk.state.halted:
+        timestamp = data.index[-1]
+        price = float(data.iloc[-1]["close"])
+        broker.execute(timestamp, "sell", broker.position, price)
+        snapshots[-1] = broker.mark(timestamp, price)
+        risk.check(snapshots[-1].equity)
+
     state = risk.state
     return PaperRunResult(
         tuple(snapshots),
