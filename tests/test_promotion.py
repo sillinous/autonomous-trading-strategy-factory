@@ -1,5 +1,3 @@
-import pandas as pd
-
 from atsf.evaluation import WalkForwardEvaluation
 from atsf.promotion import PromotionPolicy, research_to_paper
 from atsf.robustness import MonteCarloResult
