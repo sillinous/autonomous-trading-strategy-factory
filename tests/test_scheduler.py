@@ -2,7 +2,15 @@ import pandas as pd
 
 from atsf.population import seed_population
 from atsf.scheduler import evolve_generation
-from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
+from atsf.strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 
 def make_strategy() -> StrategySpec:
