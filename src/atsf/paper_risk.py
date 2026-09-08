@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .catalog import PromotionDecision
+from .promotion import PromotionDecision
 
 
 @dataclass(frozen=True)
