@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from .accounting import reconcile_equity
 from .strategy import StrategySpec
 
 
@@ -17,6 +18,7 @@ class BacktestConfig:
 @dataclass(frozen=True)
 class BacktestResult:
     equity: pd.Series
+    returns: pd.Series
     trades: pd.DataFrame
     total_return: float
     max_drawdown: float
@@ -29,7 +31,7 @@ def run_long_signal_backtest(
     strategy: StrategySpec,
     config: BacktestConfig | None = None,
 ) -> BacktestResult:
-    """Deterministic long-only kernel with an auditable trade-return ledger."""
+    """Deterministic long-only kernel with an auditable return ledger."""
     config = config or BacktestConfig()
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
@@ -37,18 +39,24 @@ def run_long_signal_backtest(
         raise ValueError("data and signal indexes must match")
     if data.empty:
         raise ValueError("data cannot be empty")
+    if config.initial_cash <= 0:
+        raise ValueError("initial_cash must be positive")
+    if config.commission_bps < 0 or config.slippage_bps < 0:
+        raise ValueError("transaction costs cannot be negative")
 
     prices = data["close"].astype(float)
     target = signal.astype(bool).shift(1).fillna(False)
     position = target.astype(float) * strategy.position_sizing.max_position
     returns = prices.pct_change().fillna(0.0) * position
-
     turnover = position.diff().abs().fillna(position.abs())
     friction = turnover * (config.commission_bps + config.slippage_bps) / 10_000.0
     net_returns = returns - friction
-
     equity = (1.0 + net_returns).cumprod() * config.initial_cash
     drawdown = equity / equity.cummax() - 1.0
+
+    reconciliation = reconcile_equity(equity, net_returns)
+    if not reconciliation.passed:
+        raise RuntimeError("backtest accounting reconciliation failed")
 
     trade_rows: list[dict[str, object]] = []
     trade_returns: list[float] = []
@@ -71,6 +79,7 @@ def run_long_signal_backtest(
     trades = pd.DataFrame(trade_rows, columns=["timestamp", "action"])
     return BacktestResult(
         equity=equity,
+        returns=net_returns,
         trades=trades,
         total_return=float(equity.iloc[-1] / config.initial_cash - 1.0),
         max_drawdown=float(drawdown.min()),
