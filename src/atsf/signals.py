@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from typing import Final
+
 import numpy as np
 import pandas as pd
 
 from .strategy import Comparator, Condition, Indicator, Signal, StrategySpec
 
 
-SUPPORTED_INDICATORS = frozenset({"sma", "ema", "rsi"})
+SUPPORTED_INDICATORS: Final = frozenset({"sma", "ema", "rsi"})
 
 
 def _source(data: pd.DataFrame, name: str) -> pd.Series:
