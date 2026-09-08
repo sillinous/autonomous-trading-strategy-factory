@@ -20,6 +20,7 @@ class BacktestResult:
     trades: pd.DataFrame
     total_return: float
     max_drawdown: float
+    trade_returns: tuple[float, ...] = ()
 
 
 def run_long_signal_backtest(
@@ -28,12 +29,7 @@ def run_long_signal_backtest(
     strategy: StrategySpec,
     config: BacktestConfig | None = None,
 ) -> BacktestResult:
-    """Minimal deterministic long-only kernel.
-
-    `data` must contain close prices indexed by timestamp. `signal` is a boolean
-    series aligned to data; positions are entered/exited at the next bar's close.
-    This intentionally forms a small foundation for the richer event engine.
-    """
+    """Deterministic long-only kernel with an auditable trade-return ledger."""
     config = config or BacktestConfig()
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
@@ -54,12 +50,22 @@ def run_long_signal_backtest(
     equity = (1.0 + net_returns).cumprod() * config.initial_cash
     drawdown = equity / equity.cummax() - 1.0
 
-    trade_rows = []
+    trade_rows: list[dict[str, object]] = []
+    trade_returns: list[float] = []
     previous = False
+    entry_price: float | None = None
     for timestamp, active in target.items():
         active = bool(active)
-        if active != previous:
-            trade_rows.append({"timestamp": timestamp, "action": "buy" if active else "sell"})
+        if active and not previous:
+            entry_price = float(prices.loc[timestamp])
+            trade_rows.append({"timestamp": timestamp, "action": "buy"})
+        elif not active and previous:
+            if entry_price is not None:
+                gross = float(prices.loc[timestamp] / entry_price - 1.0)
+                cost = 2.0 * (config.commission_bps + config.slippage_bps) / 10_000.0
+                trade_returns.append(gross * strategy.position_sizing.max_position - cost)
+            trade_rows.append({"timestamp": timestamp, "action": "sell"})
+            entry_price = None
         previous = active
 
     trades = pd.DataFrame(trade_rows, columns=["timestamp", "action"])
@@ -68,4 +74,5 @@ def run_long_signal_backtest(
         trades=trades,
         total_return=float(equity.iloc[-1] / config.initial_cash - 1.0),
         max_drawdown=float(drawdown.min()),
+        trade_returns=tuple(trade_returns),
     )
