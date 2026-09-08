@@ -29,6 +29,7 @@ def run_research(
     population_size: int = 10,
     survivor_count: int = 3,
     seed: int = 0,
+    dataset_id: str = "research",
     registry: ExperimentRegistry | None = None,
     fitness_policy: FitnessPolicy | None = None,
 ) -> ResearchRunResult:
@@ -39,7 +40,7 @@ def run_research(
         raise ValueError("population sizes must be positive")
     if survivor_count > population_size:
         raise ValueError("survivor_count cannot exceed population_size")
-    identity = dataset_identity(data, "research")
+    identity = dataset_identity(data, dataset_id)
     population = seed_population(seeds)
     if not population:
         raise ValueError("seeds must contain at least one unique strategy")
@@ -73,6 +74,44 @@ def run_research(
                     seed + generation,
                 )
                 store.save_experiment(spec, evaluation.experiment)
+                store.save_evaluation_evidence(
+                    evaluation.experiment.experiment_id,
+                    {
+                        "candidate_id": evaluation.candidate_id,
+                        "walk_forward": {
+                            "passed": evaluation.walk_forward.passed,
+                            "oos_return": evaluation.walk_forward.oos_return,
+                            "oos_sharpe": evaluation.walk_forward.oos_sharpe,
+                            "oos_drawdown": evaluation.walk_forward.oos_drawdown,
+                        },
+                        "monte_carlo": {
+                            "simulations": evaluation.monte_carlo.simulations,
+                            "seed": evaluation.monte_carlo.seed,
+                            "median_return": evaluation.monte_carlo.median_return,
+                            "worst_return": evaluation.monte_carlo.worst_return,
+                            "lower_percentile_return": evaluation.monte_carlo.lower_percentile_return,
+                            "pass_rate": evaluation.monte_carlo.pass_rate,
+                        },
+                        "perturbation": {
+                            "samples": evaluation.perturbation.samples,
+                            "seed": evaluation.perturbation.seed,
+                            "pass_rate": evaluation.perturbation.pass_rate,
+                            "worst_score": evaluation.perturbation.worst_score,
+                            "median_score": evaluation.perturbation.median_score,
+                            "strategy_ids": evaluation.perturbation.strategy_ids,
+                        },
+                        "regime": {
+                            "score": evaluation.regime.score,
+                            "regime_returns": evaluation.regime.regime_returns,
+                            "covered_regimes": evaluation.regime.covered_regimes,
+                        },
+                        "promotion": {
+                            "stage": evaluation.promotion.stage,
+                            "eligible": evaluation.promotion.eligible,
+                            "reasons": evaluation.promotion.reasons,
+                        },
+                    },
+                )
             for candidate in result.next_population:
                 store.save_strategy(candidate.strategy)
                 store.save_lineage(candidate.lineage)
