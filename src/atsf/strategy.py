@@ -45,7 +45,7 @@ class Signal(BaseModel):
     any: list[Condition] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def has_conditions(self) -> "Signal":
+    def has_conditions(self) -> Signal:
         if not self.all and not self.any:
             raise ValueError("signal must contain at least one condition")
         return self
@@ -86,7 +86,7 @@ class StrategySpec(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_risk_consistency(self) -> "StrategySpec":
+    def validate_risk_consistency(self) -> StrategySpec:
         if self.risk.max_position > self.position_sizing.max_position:
             raise ValueError("risk.max_position cannot exceed position_sizing.max_position")
         return self
