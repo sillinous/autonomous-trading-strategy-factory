@@ -99,3 +99,33 @@ def test_registry_ranks_only_eligible_experiments():
     with pytest.raises(ValueError):
         registry.rank_experiments(limit=0)
     registry.close()
+
+
+def test_registry_round_trips_portfolio_definition_and_run_attribution():
+    registry = ExperimentRegistry()
+    strategy = make_strategy()
+    strategy_id = registry.save_strategy(strategy)
+    registry.save_portfolio(
+        "portfolio-1",
+        {"policy": "inverse_volatility", "version": 1},
+        {strategy_id: 0.5},
+    )
+    assert registry.get_portfolio("portfolio-1") == {
+        "portfolio_id": "portfolio-1",
+        "definition": {"policy": "inverse_volatility", "version": 1},
+        "members": {strategy_id: 0.5},
+    }
+    registry.save_portfolio_run(
+        "run-1",
+        "portfolio-1",
+        101_000.0,
+        False,
+        None,
+        [{"strategy_id": strategy_id, "return_contribution": 0.01, "risk_contribution": 0.02}],
+    )
+    row = registry._connection.execute(
+        "SELECT * FROM portfolio_attribution WHERE run_id = ?", ("run-1",)
+    ).fetchone()
+    assert row["strategy_id"] == strategy_id
+    assert row["return_contribution"] == pytest.approx(0.01)
+    registry.close()
