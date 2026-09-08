@@ -48,7 +48,11 @@ def compute_indicators(data: pd.DataFrame, indicators: list[Indicator]) -> dict[
     return values
 
 
-def _operand(data: pd.DataFrame, indicators: dict[str, pd.Series], operand: str | float | int) -> pd.Series | float | int:
+def _operand(
+    data: pd.DataFrame,
+    indicators: dict[str, pd.Series],
+    operand: str | float | int,
+) -> pd.Series | float | int:
     if isinstance(operand, str):
         if operand in indicators:
             return indicators[operand]
@@ -56,7 +60,9 @@ def _operand(data: pd.DataFrame, indicators: dict[str, pd.Series], operand: str 
     return operand
 
 
-def _compare(left: pd.Series, comparator: Comparator, right: pd.Series | float | int) -> pd.Series:
+def _compare(
+    left: pd.Series, comparator: Comparator, right: pd.Series | float | int
+) -> pd.Series:
     if comparator == Comparator.GT:
         return left > right
     if comparator == Comparator.GTE:
@@ -78,7 +84,9 @@ def _compare(left: pd.Series, comparator: Comparator, right: pd.Series | float |
     raise ValueError(f"unsupported comparator: {comparator.value}")
 
 
-def evaluate_condition(data: pd.DataFrame, condition: Condition, indicators: dict[str, pd.Series]) -> pd.Series:
+def evaluate_condition(
+    data: pd.DataFrame, condition: Condition, indicators: dict[str, pd.Series]
+) -> pd.Series:
     left = _operand(data, indicators, condition.left)
     right = _operand(data, indicators, condition.right)
     if not isinstance(left, pd.Series):
@@ -86,13 +94,25 @@ def evaluate_condition(data: pd.DataFrame, condition: Condition, indicators: dic
     return _compare(left, condition.comparator, right).fillna(False).astype(bool)
 
 
-def evaluate_signal(data: pd.DataFrame, signal: Signal, indicators: dict[str, pd.Series]) -> pd.Series:
+def evaluate_signal(
+    data: pd.DataFrame, signal: Signal, indicators: dict[str, pd.Series]
+) -> pd.Series:
     """Evaluate a signal as AND across ``all`` and OR across ``any`` groups."""
     all_results = [evaluate_condition(data, condition, indicators) for condition in signal.all]
     any_results = [evaluate_condition(data, condition, indicators) for condition in signal.any]
-    all_result = pd.concat(all_results, axis=1).all(axis=1) if all_results else pd.Series(True, index=data.index)
-    any_result = pd.concat(any_results, axis=1).any(axis=1) if any_results else pd.Series(False, index=data.index)
-    return (all_result & any_result) if signal.all and signal.any else (all_result if signal.all else any_result)
+    all_result = (
+        pd.concat(all_results, axis=1).all(axis=1)
+        if all_results
+        else pd.Series(True, index=data.index)
+    )
+    any_result = (
+        pd.concat(any_results, axis=1).any(axis=1)
+        if any_results
+        else pd.Series(False, index=data.index)
+    )
+    return (all_result & any_result) if signal.all and signal.any else (
+        all_result if signal.all else any_result
+    )
 
 
 def strategy_signals(data: pd.DataFrame, strategy: StrategySpec) -> tuple[pd.Series, pd.Series]:
