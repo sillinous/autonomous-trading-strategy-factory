@@ -49,17 +49,33 @@ def evolve_generation(
     )
     ranked = sorted(
         zip(population, evaluations),
-        key=lambda pair: (pair[1].fitness.eligible, pair[1].fitness.score),
+        key=lambda pair: (
+            pair[1].fitness.eligible,
+            pair[1].fitness.score,
+            pair[0].strategy_id,
+        ),
         reverse=True,
     )
     survivors = tuple(candidate for candidate, _ in ranked[:survivor_count])
+    if not survivors:
+        raise RuntimeError("no survivors available for mutation")
+
     rng = Random(seed)
     next_population = list(survivors)
-    while len(next_population) < target_size:
+    seen = {candidate.strategy_id for candidate in next_population}
+    attempts = 0
+    max_attempts = max(100, target_size * 100)
+    while len(next_population) < target_size and attempts < max_attempts:
         parent = rng.choice(survivors)
         child = mutate_candidate(parent, rng)
-        if child.strategy_id not in {candidate.strategy_id for candidate in next_population}:
-            next_population.append(child)
+        attempts += 1
+        if child.strategy_id in seen:
+            continue
+        seen.add(child.strategy_id)
+        next_population.append(child)
+
+    if len(next_population) < target_size:
+        raise RuntimeError("unable to generate a unique next population")
 
     generation = max(candidate.lineage.generation for candidate in population) + 1
     return GenerationResult(
