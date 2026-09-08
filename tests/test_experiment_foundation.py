@@ -1,10 +1,13 @@
 import pandas as pd
 import pytest
 
+from atsf.evaluation import evaluate_walk_forward
 from atsf.experiment import ExperimentSpec
 from atsf.fitness import FitnessPolicy, score_strategy
 from atsf.lineage import LineageRecord
 from atsf.splits import chronological_split, walk_forward_windows
+from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
+from atsf.validation import ValidationPolicy
 
 
 def test_chronological_split_has_no_overlap():
@@ -44,9 +47,6 @@ def test_fitness_accepts_robust_candidate():
 
 
 def test_experiment_id_is_reproducible():
-    from atsf.strategy import Condition, Comparator, Signal
-    from atsf.strategy import PositionSizing, RiskLimits, StrategySpec
-
     strategy = StrategySpec(
         name="demo",
         universe=["TEST"],
@@ -63,3 +63,29 @@ def test_experiment_id_is_reproducible():
 def test_lineage_requires_parent_for_derived_strategy():
     with pytest.raises(ValueError):
         LineageRecord("child", generation=1, operator="mutation")
+
+
+def test_walk_forward_evaluation_covers_train_validation_and_oos():
+    data = pd.DataFrame(
+        {"close": range(1, 19)}, index=pd.date_range("2024-01-01", periods=18)
+    )
+    strategy = StrategySpec(
+        name="no_trade",
+        universe=["TEST"],
+        entry=Signal(all=[Condition(left="close", comparator=Comparator.GT, right=10_000)]),
+        exit=Signal(all=[Condition(left="close", comparator=Comparator.LT, right=-10_000)]),
+        position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
+        risk=RiskLimits(max_position=0.5),
+    )
+    result = evaluate_walk_forward(
+        data,
+        strategy,
+        train_size=8,
+        validation_size=5,
+        test_size=5,
+        validation_policy=ValidationPolicy(min_sharpe=-1.0, max_drawdown=1.0),
+        fitness_policy=FitnessPolicy(min_sharpe=-1.0, max_drawdown=1.0),
+    )
+    assert len(result.windows) == 3
+    assert result.passed
+    assert result.oos_return == 0.0
