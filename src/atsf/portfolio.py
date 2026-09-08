@@ -24,7 +24,7 @@ def select_diversified_strategies(
     ranked_strategy_ids: list[str],
     policy: PortfolioPolicy | None = None,
 ) -> PortfolioSelection:
-    """Greedily select ranked strategies while enforcing correlation concentration limits."""
+    """Select ranked strategies while limiting positive correlation concentration."""
     policy = policy or PortfolioPolicy()
     if policy.max_strategies <= 0:
         raise ValueError("max_strategies must be positive")
@@ -32,6 +32,8 @@ def select_diversified_strategies(
         raise ValueError("max_average_correlation must be between 0 and 1")
     if len(returns) < policy.min_history:
         raise ValueError("insufficient return history")
+    if len(set(ranked_strategy_ids)) != len(ranked_strategy_ids):
+        raise ValueError("ranked strategy IDs must be unique")
     missing = [identifier for identifier in ranked_strategy_ids if identifier not in returns.columns]
     if missing:
         raise ValueError(f"missing strategy returns: {missing}")
@@ -46,17 +48,17 @@ def select_diversified_strategies(
             selected.append(identifier)
             continue
         correlations = returns[selected + [identifier]].corr()[identifier].drop(identifier)
-        average = float(correlations.abs().mean())
-        if average <= policy.max_average_correlation:
+        positive_average = float(correlations.clip(lower=0).mean())
+        if positive_average <= policy.max_average_correlation:
             selected.append(identifier)
         else:
             rejected.append(identifier)
 
     average_correlation = 0.0
     if len(selected) > 1:
-        matrix = returns[selected].corr().abs()
+        matrix = returns[selected].corr()
         upper = [
-            float(matrix.iloc[i, j])
+            max(0.0, float(matrix.iloc[i, j]))
             for i in range(len(selected))
             for j in range(i + 1, len(selected))
         ]
