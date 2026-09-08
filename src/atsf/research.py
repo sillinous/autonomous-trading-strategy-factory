@@ -52,6 +52,7 @@ def run_research(
             store.save_strategy(candidate.strategy)
             store.save_lineage(candidate.lineage)
         for generation in range(generations):
+            candidates_by_id = {candidate.strategy_id: candidate for candidate in population}
             result = evolve_generation(
                 population,
                 data,
@@ -64,8 +65,9 @@ def run_research(
             )
             results.append(result)
             for evaluation in result.evaluations:
+                candidate = candidates_by_id[evaluation.candidate_id]
                 spec = ExperimentSpec(
-                    evaluation.candidate.strategy,
+                    candidate.strategy,
                     identity.dataset_id,
                     identity.version,
                     seed + generation,
