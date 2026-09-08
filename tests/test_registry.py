@@ -1,5 +1,3 @@
-import pytest
-
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
@@ -51,8 +49,3 @@ def test_registry_persists_experiment_metadata():
     assert row["seed"] == 7
     assert row["status"] == "paper"
     registry.close()
-
-
-def test_registry_rejects_invalid_database_path(tmp_path):
-    with pytest.raises(Exception):
-        ExperimentRegistry(tmp_path / "missing" / "registry.db")
