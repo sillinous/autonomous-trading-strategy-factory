@@ -55,7 +55,10 @@ def select_diversified_strategies(
     average_correlation = 0.0
     if len(selected) > 1:
         matrix = returns[selected].corr().abs()
-        values = matrix.where(~pd.DataFrame(index=matrix.index, columns=matrix.columns).fillna(False).astype(bool)).values
-        upper = [values[i, j] for i in range(len(selected)) for j in range(i + 1, len(selected))]
-        average_correlation = float(sum(upper) / len(upper)) if upper else 0.0
+        upper = [
+            float(matrix.iloc[i, j])
+            for i in range(len(selected))
+            for j in range(i + 1, len(selected))
+        ]
+        average_correlation = sum(upper) / len(upper) if upper else 0.0
     return PortfolioSelection(tuple(selected), tuple(rejected), average_correlation)
