@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from random import Random
 from statistics import median
-from typing import Callable
 
 from .generator import mutate_indicator_period, mutate_threshold
 from .population import strategy_id
