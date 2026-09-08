@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 from dataclasses import dataclass
+import math
 
 import pandas as pd
 
@@ -35,10 +36,10 @@ def validate_market_data(data: pd.DataFrame) -> pd.DataFrame:
     normalized = data.loc[:, list(REQUIRED_COLUMNS)].copy()
     for column in REQUIRED_COLUMNS:
         normalized[column] = pd.to_numeric(normalized[column], errors="raise")
-    if not normalized.apply(lambda column: column.map(pd.notna).all()).all():
+        if not normalized[column].map(math.isfinite).all():
+            raise ValueError("market data contains non-finite values")
+    if normalized.isna().any().any():
         raise ValueError("market data contains missing values")
-    if not normalized.apply(lambda column: column.map(lambda value: pd.notna(value) and pd.isfinite(value)).all()).all():
-        raise ValueError("market data contains non-finite values")
     if (normalized["volume"] < 0).any():
         raise ValueError("volume cannot be negative")
     if (normalized["low"] > normalized[["open", "close", "high"]].min(axis=1)).any():
