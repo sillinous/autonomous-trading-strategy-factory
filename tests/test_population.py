@@ -1,7 +1,15 @@
 from random import Random
 
-from atsf.population import mutate_candidate, seed_population
-from atsf.strategy import Condition, Comparator, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
+from atsf.population import mutate_candidate, seed_population, strategy_id
+from atsf.strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 
 def make_strategy() -> StrategySpec:
@@ -22,6 +30,12 @@ def test_seed_population_deduplicates():
     assert len(population) == 1
     assert population[0].lineage.generation == 0
     assert population[0].lineage.parent_ids == ()
+
+
+def test_strategy_id_is_stable_and_compact():
+    strategy = make_strategy()
+    assert strategy_id(strategy) == strategy_id(strategy.model_copy(deep=True))
+    assert len(strategy_id(strategy)) == 16
 
 
 def test_mutation_advances_generation_and_parentage():
