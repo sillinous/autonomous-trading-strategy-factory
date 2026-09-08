@@ -4,7 +4,15 @@ from atsf.fitness import FitnessPolicy
 from atsf.population import seed_population
 from atsf.registry import ExperimentRegistry
 from atsf.research import run_research
-from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
+from atsf.strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 
 def make_strategy() -> StrategySpec:
@@ -35,15 +43,15 @@ def make_data() -> pd.DataFrame:
 
 
 def test_research_run_is_reproducible():
-    kwargs = dict(
-        seeds=[make_strategy()],
-        data=make_data(),
-        generations=2,
-        population_size=4,
-        survivor_count=2,
-        seed=17,
-        fitness_policy=FitnessPolicy(min_sharpe=-1.0, max_drawdown=1.0),
-    )
+    kwargs = {
+        "seeds": [make_strategy()],
+        "data": make_data(),
+        "generations": 2,
+        "population_size": 4,
+        "survivor_count": 2,
+        "seed": 17,
+        "fitness_policy": FitnessPolicy(min_sharpe=-1.0, max_drawdown=1.0),
+    }
     first = run_research(**kwargs)
     second = run_research(**kwargs)
     assert first.dataset_version == second.dataset_version
