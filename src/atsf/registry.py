@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from .experiment import ExperimentResult, ExperimentSpec
 from .lineage import LineageRecord
@@ -41,6 +42,11 @@ class ExperimentRegistry:
                 parent_ids_json TEXT NOT NULL,
                 operator TEXT NOT NULL,
                 parameters_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS evaluation_evidence (
+                experiment_id TEXT PRIMARY KEY,
+                evidence_json TEXT NOT NULL,
+                FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id)
             );
             """
         )
@@ -85,6 +91,45 @@ class ExperimentRegistry:
             ),
         )
         self._connection.commit()
+
+    def save_evaluation_evidence(self, experiment_id: str, evidence: dict[str, Any]) -> None:
+        """Persist JSON-safe evaluation evidence without coupling the registry to result classes."""
+        payload = json.dumps(evidence, sort_keys=True, allow_nan=False)
+        self._connection.execute(
+            """INSERT OR REPLACE INTO evaluation_evidence(experiment_id, evidence_json)
+            VALUES (?, ?)""",
+            (experiment_id, payload),
+        )
+        self._connection.commit()
+
+    def get_evaluation_evidence(self, experiment_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT evidence_json FROM evaluation_evidence WHERE experiment_id = ?",
+            (experiment_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["evidence_json"])
+
+    def get_experiment(self, identifier: str) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT * FROM experiments WHERE experiment_id = ?", (identifier,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_experiments(self, dataset_id: str | None = None) -> list[dict[str, Any]]:
+        if dataset_id is None:
+            rows = self._connection.execute(
+                "SELECT * FROM experiments ORDER BY experiment_id"
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                "SELECT * FROM experiments WHERE dataset_id = ? ORDER BY experiment_id",
+                (dataset_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_lineage(self, record: LineageRecord) -> None:
         self._connection.execute(
