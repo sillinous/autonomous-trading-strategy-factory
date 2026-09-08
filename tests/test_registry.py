@@ -84,3 +84,18 @@ def test_registry_rejects_non_json_evidence():
     with pytest.raises((TypeError, ValueError)):
         registry.save_evaluation_evidence("missing", {"bad": float("nan")})
     registry.close()
+
+
+def test_registry_ranks_only_eligible_experiments():
+    registry = ExperimentRegistry()
+    strategy = make_strategy()
+    for seed, status, score in ((1, "eligible", 0.5), (2, "eligible", 1.5), (3, "research", 99.0)):
+        spec = ExperimentSpec(strategy.model_copy(update={"version": seed}), "prices", "v1", seed)
+        registry.save_experiment(spec, ExperimentResult(spec.experiment_id, status, score=score))
+
+    ranked = registry.rank_experiments("prices")
+    assert [row["score"] for row in ranked] == [1.5, 0.5]
+    assert registry.rank_experiments("prices", limit=1)[0]["score"] == 1.5
+    with pytest.raises(ValueError):
+        registry.rank_experiments(limit=0)
+    registry.close()
