@@ -1,3 +1,5 @@
+import pytest
+
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
@@ -51,11 +53,34 @@ def test_registry_persists_experiment_metadata():
     result = ExperimentResult(spec.experiment_id, "paper", score=1.2)
     registry.save_experiment(spec, result)
 
-    row = registry._connection.execute(
-        "SELECT * FROM experiments WHERE experiment_id = ?", (spec.experiment_id,)
-    ).fetchone()
+    row = registry.get_experiment(spec.experiment_id)
+    assert row is not None
     assert row["strategy_id"] == registry.save_strategy(strategy)
+    assert row["dataset_id"] == "prices"
     assert row["dataset_version"] == "v1"
     assert row["seed"] == 7
     assert row["status"] == "paper"
+    assert registry.list_experiments("prices")[0]["experiment_id"] == spec.experiment_id
+    registry.close()
+
+
+def test_registry_round_trips_evaluation_evidence():
+    registry = ExperimentRegistry()
+    strategy = make_strategy()
+    spec = ExperimentSpec(strategy, "prices", "v1", seed=3)
+    result = ExperimentResult(spec.experiment_id, "research", score=0.8)
+    registry.save_experiment(spec, result)
+    evidence = {
+        "walk_forward": {"oos_sharpe": 0.8, "oos_drawdown": 0.1},
+        "promotion": {"stage": "research", "eligible": False},
+    }
+    registry.save_evaluation_evidence(spec.experiment_id, evidence)
+    assert registry.get_evaluation_evidence(spec.experiment_id) == evidence
+    registry.close()
+
+
+def test_registry_rejects_non_json_evidence():
+    registry = ExperimentRegistry()
+    with pytest.raises((TypeError, ValueError)):
+        registry.save_evaluation_evidence("missing", {"bad": float("nan")})
     registry.close()
