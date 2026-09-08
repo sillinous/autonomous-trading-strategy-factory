@@ -55,7 +55,7 @@ def walk_forward_windows(
     test_size: int,
     step_size: int | None = None,
 ) -> list[WalkForwardWindow]:
-    """Create strictly chronological rolling windows."""
+    """Create chronological rolling windows; the default advances one observation."""
     if not data.index.is_monotonic_increasing:
         raise ValueError("data index must be monotonically increasing")
     if min(train_size, validation_size, test_size) <= 0:
