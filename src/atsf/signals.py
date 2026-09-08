@@ -39,7 +39,9 @@ def compute_indicators(data: pd.DataFrame, indicators: list[Indicator]) -> dict[
         if name == "sma":
             result = source.rolling(indicator.period, min_periods=indicator.period).mean()
         elif name == "ema":
-            result = source.ewm(span=indicator.period, adjust=False, min_periods=indicator.period).mean()
+            result = source.ewm(
+                span=indicator.period, adjust=False, min_periods=indicator.period
+            ).mean()
         else:
             result = _rsi(source, indicator.period)
         if indicator.name in values:
@@ -51,8 +53,8 @@ def compute_indicators(data: pd.DataFrame, indicators: list[Indicator]) -> dict[
 def _operand(
     data: pd.DataFrame,
     indicators: dict[str, pd.Series],
-    operand: str | float | int,
-) -> pd.Series | float | int:
+    operand: str | float,
+) -> pd.Series | float:
     if isinstance(operand, str):
         if operand in indicators:
             return indicators[operand]
@@ -61,7 +63,7 @@ def _operand(
 
 
 def _compare(
-    left: pd.Series, comparator: Comparator, right: pd.Series | float | int
+    left: pd.Series, comparator: Comparator, right: pd.Series | float
 ) -> pd.Series:
     if comparator == Comparator.GT:
         return left > right
@@ -89,7 +91,7 @@ def evaluate_condition(
     left = _operand(data, indicators, condition.left)
     right = _operand(data, indicators, condition.right)
     if not isinstance(left, pd.Series):
-        raise ValueError("condition left operand must resolve to a series")
+        raise TypeError("condition left operand must resolve to a series")
     return _compare(left, condition.comparator, right).fillna(False).astype(bool)
 
 
