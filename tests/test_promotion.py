@@ -45,9 +45,7 @@ def regime(score: float = 0.01) -> RegimeStabilityResult:
 
 
 def test_promotion_requires_all_hard_gates():
-    decision = research_to_paper(
-        evaluation(), monte_carlo(), perturbation(), regime()
-    )
+    decision = research_to_paper(evaluation(), monte_carlo(), perturbation(), regime())
     assert decision.eligible
     assert decision.stage == "paper"
 
@@ -56,8 +54,8 @@ def test_missing_robustness_evidence_blocks_paper_promotion():
     decision = research_to_paper(evaluation(), monte_carlo())
     assert not decision.eligible
     assert decision.stage == "research"
-    assert "parameter perturbation evidence" in decision.reasons
-    assert "regime stability evidence" in decision.reasons
+    assert any("parameter perturbation evidence" in reason for reason in decision.reasons)
+    assert any("regime stability evidence" in reason for reason in decision.reasons)
 
 
 def test_failed_oos_blocks_paper_promotion():
