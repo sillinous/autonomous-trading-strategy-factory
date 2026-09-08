@@ -75,3 +75,27 @@ def regime_returns(
         "high_volatility": strategy_returns[high_vol.fillna(False)],
         "low_volatility": strategy_returns[(~high_vol).fillna(False)],
     }
+
+
+@dataclass(frozen=True)
+class RegimeStabilityResult:
+    score: float
+    regime_returns: dict[str, float]
+    covered_regimes: tuple[str, ...]
+
+
+def score_regime_stability(regimes: dict[str, pd.Series]) -> RegimeStabilityResult:
+    """Score consistency across non-empty regimes using the weakest regime return."""
+    if not regimes:
+        raise ValueError("regimes must not be empty")
+    values: dict[str, float] = {}
+    for name, returns in regimes.items():
+        finite = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        if finite.empty:
+            continue
+        values[name] = float((1.0 + finite).prod() - 1.0)
+    if not values:
+        raise ValueError("regimes contain no finite observations")
+    covered = tuple(sorted(values))
+    score = float(min(values.values()))
+    return RegimeStabilityResult(score=score, regime_returns=values, covered_regimes=covered)
