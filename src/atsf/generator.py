@@ -4,7 +4,6 @@ from random import Random
 
 from .strategy import StrategySpec
 
-
 DEFAULT_PERIODS = (5, 10, 14, 20, 50, 100, 200)
 
 
@@ -37,4 +36,6 @@ def mutate_threshold(strategy: StrategySpec, rng: Random | None = None) -> Strat
     updated = condition.model_copy(update={"right": condition.right * factor})
     conditions[index] = updated
     entry = strategy.entry.model_copy(update={"all": conditions})
-    return strategy.model_copy(update={"version": strategy.version + 1, "entry": entry})
+    return strategy.model_copy(
+        update={"version": strategy.version + 1, "entry": entry}
+    )
