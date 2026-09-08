@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import pandas as pd
 
