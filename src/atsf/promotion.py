@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .evaluation import WalkForwardEvaluation
-from .robustness import MonteCarloResult
+from .perturbation import PerturbationResult
+from .robustness import MonteCarloResult, RegimeStabilityResult
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,8 @@ class PromotionPolicy:
     max_oos_drawdown: float = 0.25
     min_monte_carlo_pass_rate: float = 0.95
     min_monte_carlo_lower_return: float = -0.10
+    min_perturbation_pass_rate: float = 0.80
+    min_regime_stability: float = -0.05
     require_walk_forward_pass: bool = True
 
 
@@ -25,9 +28,11 @@ class PromotionDecision:
 def research_to_paper(
     evaluation: WalkForwardEvaluation,
     monte_carlo: MonteCarloResult,
+    perturbation: PerturbationResult | None = None,
+    regime: RegimeStabilityResult | None = None,
     policy: PromotionPolicy | None = None,
 ) -> PromotionDecision:
-    """Apply hard deterministic gates before allowing a strategy into paper trading."""
+    """Apply deterministic robustness gates before paper trading."""
     policy = policy or PromotionPolicy()
     reasons: list[str] = []
     if policy.require_walk_forward_pass and not evaluation.passed:
@@ -40,6 +45,14 @@ def research_to_paper(
         reasons.append("Monte Carlo pass rate is below the promotion minimum")
     if monte_carlo.lower_percentile_return < policy.min_monte_carlo_lower_return:
         reasons.append("Monte Carlo lower-percentile return is too weak")
+    if perturbation is None:
+        reasons.append("parameter perturbation evidence is required")
+    elif perturbation.pass_rate < policy.min_perturbation_pass_rate:
+        reasons.append("parameter perturbation stability is below the promotion minimum")
+    if regime is None:
+        reasons.append("regime stability evidence is required")
+    elif regime.score < policy.min_regime_stability:
+        reasons.append("regime stability is below the promotion minimum")
     return PromotionDecision(
         stage="paper" if not reasons else "research",
         eligible=not reasons,
