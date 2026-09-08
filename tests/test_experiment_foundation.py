@@ -22,7 +22,7 @@ def test_chronological_split_has_no_overlap():
 def test_walk_forward_windows_are_ordered():
     data = pd.DataFrame({"close": range(12)}, index=pd.date_range("2024-01-01", periods=12))
     windows = walk_forward_windows(data, train_size=5, validation_size=2, test_size=2)
-    assert len(windows) == 3
+    assert len(windows) == 4
     for window in windows:
         assert window.train.index[-1] < window.validation.index[0]
         assert window.validation.index[-1] < window.test.index[0]
