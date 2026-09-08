@@ -3,7 +3,15 @@ import math
 import pytest
 
 from atsf.perturbation import evaluate_parameter_perturbations
-from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, Signal, StrategySpec
+from atsf.strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 
 def make_strategy() -> StrategySpec:
@@ -14,6 +22,7 @@ def make_strategy() -> StrategySpec:
         entry=Signal(all=[Condition(left="close", comparator=Comparator.GT, right=1.0)]),
         exit=Signal(all=[Condition(left="close", comparator=Comparator.LT, right=0.5)]),
         position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
+        risk=RiskLimits(max_position=0.5),
     )
 
 
