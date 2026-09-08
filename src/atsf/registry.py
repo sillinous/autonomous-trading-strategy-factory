@@ -22,6 +22,7 @@ class ExperimentRegistry:
     def _create_schema(self) -> None:
         self._connection.executescript(
             """
+            PRAGMA foreign_keys = ON;
             CREATE TABLE IF NOT EXISTS strategies (
                 strategy_id TEXT PRIMARY KEY,
                 definition_json TEXT NOT NULL
@@ -34,20 +35,26 @@ class ExperimentRegistry:
                 seed INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 score REAL,
-                reason TEXT
+                reason TEXT,
+                FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id)
             );
             CREATE TABLE IF NOT EXISTS lineage (
                 strategy_id TEXT PRIMARY KEY,
                 generation INTEGER NOT NULL,
                 parent_ids_json TEXT NOT NULL,
                 operator TEXT NOT NULL,
-                parameters_json TEXT NOT NULL
+                parameters_json TEXT NOT NULL,
+                FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id)
             );
             CREATE TABLE IF NOT EXISTS evaluation_evidence (
                 experiment_id TEXT PRIMARY KEY,
                 evidence_json TEXT NOT NULL,
                 FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id)
             );
+            CREATE INDEX IF NOT EXISTS idx_experiments_dataset
+                ON experiments(dataset_id, dataset_version);
+            CREATE INDEX IF NOT EXISTS idx_experiments_strategy
+                ON experiments(strategy_id);
             """
         )
         self._connection.commit()
@@ -57,7 +64,7 @@ class ExperimentRegistry:
 
     def save_strategy(self, strategy: StrategySpec) -> str:
         identifier = strategy_id(strategy)
-        payload = json.dumps(strategy.model_dump(mode="json"), sort_keys=True)
+        payload = json.dumps(strategy.model_dump(mode="json"), sort_keys=True, allow_nan=False)
         self._connection.execute(
             "INSERT OR REPLACE INTO strategies(strategy_id, definition_json) VALUES (?, ?)",
             (identifier, payload),
@@ -129,6 +136,26 @@ class ExperimentRegistry:
                 "SELECT * FROM experiments WHERE dataset_id = ? ORDER BY experiment_id",
                 (dataset_id,),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def rank_experiments(
+        self,
+        dataset_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return eligible experiments ordered by score, then stable experiment ID."""
+        if limit is not None and limit <= 0:
+            raise ValueError("limit must be positive")
+        query = (
+            "SELECT * FROM experiments WHERE status = 'eligible' "
+            + ("AND dataset_id = ? " if dataset_id is not None else "")
+            + "ORDER BY score DESC, experiment_id ASC"
+        )
+        params: tuple[Any, ...] = (dataset_id,) if dataset_id is not None else ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params += (limit,)
+        rows = self._connection.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     def save_lineage(self, record: LineageRecord) -> None:
