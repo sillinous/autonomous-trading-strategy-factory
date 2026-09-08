@@ -1,7 +1,6 @@
 import pandas as pd
 import pytest
 
-from atsf.paper_risk import PaperRiskController
 from atsf.portfolio_paper import run_paper_portfolio
 from atsf.promotion import PromotionDecision
 from atsf.strategy import (
