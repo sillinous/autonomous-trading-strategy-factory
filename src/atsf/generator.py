@@ -31,7 +31,7 @@ def mutate_threshold(strategy: StrategySpec, rng: Random | None = None) -> Strat
     index = rng.randrange(len(conditions))
     condition = conditions[index]
     if not isinstance(condition.right, (int, float)) or isinstance(condition.right, bool):
-        raise ValueError("selected condition has no numeric threshold")
+        raise TypeError("selected condition has no numeric threshold")
     factor = 1.0 + rng.uniform(-0.10, 0.10)
     updated = condition.model_copy(update={"right": condition.right * factor})
     conditions[index] = updated
