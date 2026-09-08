@@ -55,11 +55,11 @@ def research_to_paper(
     if monte_carlo.lower_percentile_return < policy.min_monte_carlo_lower_return:
         reasons.append("Monte Carlo lower-percentile return is too weak")
     if perturbation is None:
-        reasons.append("parameter perturbation evidence is required")
+        reasons.append("parameter perturbation evidence")
     elif not isfinite(perturbation.pass_rate) or perturbation.pass_rate < policy.min_perturbation_pass_rate:
         reasons.append("parameter perturbation stability is below the promotion minimum")
     if regime is None:
-        reasons.append("regime stability evidence is required")
+        reasons.append("regime stability evidence")
     elif not isfinite(regime.score) or regime.score < policy.min_regime_stability:
         reasons.append("regime stability is below the promotion minimum")
     return PromotionDecision(
