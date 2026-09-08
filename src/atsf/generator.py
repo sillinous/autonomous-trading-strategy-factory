@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from random import Random
 
-from .strategy import Condition, Indicator, StrategySpec
+from .strategy import StrategySpec
 
 
 DEFAULT_PERIODS = (5, 10, 14, 20, 50, 100, 200)
