@@ -2,7 +2,13 @@ import pandas as pd
 
 from atsf.paper_runner import run_paper_strategy
 from atsf.strategy import (
-    Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec,
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
 )
 
 
