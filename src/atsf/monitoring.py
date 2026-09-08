@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import math
+
 import pandas as pd
 
 
@@ -35,11 +36,17 @@ def assess_degradation(
         raise ValueError("max_drawdown must be between 0 and 1")
     if policy.max_volatility < 0:
         raise ValueError("max_volatility cannot be negative")
+    if equity.empty:
+        raise ValueError("equity cannot be empty")
+    if not equity.index.is_monotonic_increasing:
+        raise ValueError("equity must be ordered chronologically")
     if len(equity) < policy.min_observations:
         raise ValueError("insufficient observations")
     values = equity.astype(float)
-    if (values <= 0).any() or not values.index.is_monotonic_increasing:
-        raise ValueError("equity must be positive and chronologically ordered")
+    if not values.apply(math.isfinite).all():
+        raise ValueError("equity must contain only finite values")
+    if (values <= 0).any():
+        raise ValueError("equity must remain positive")
     returns = values.pct_change().dropna()
     total_return = float(values.iloc[-1] / values.iloc[0] - 1.0)
     drawdown = float((values / values.cummax() - 1.0).min())
