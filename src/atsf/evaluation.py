@@ -6,11 +6,10 @@ import pandas as pd
 
 from .backtest import BacktestConfig, BacktestResult, run_long_signal_backtest
 from .fitness import FitnessPolicy, FitnessResult, score_strategy
-from .orchestrator import _position_signal
 from .signals import strategy_signals
 from .splits import WalkForwardWindow, walk_forward_windows
-from .validation import ValidationPolicy, ValidationResult, validate_equity
 from .strategy import StrategySpec
+from .validation import ValidationPolicy, ValidationResult, validate_equity
 
 
 @dataclass(frozen=True)
@@ -27,6 +26,20 @@ class WalkForwardEvaluation:
     oos_return: float
     oos_sharpe: float
     oos_drawdown: float
+
+
+def _position_signal(entry: pd.Series, exit_: pd.Series) -> pd.Series:
+    if not entry.index.equals(exit_.index):
+        raise ValueError("entry and exit indexes must match")
+    active = False
+    values: list[bool] = []
+    for timestamp in entry.index:
+        if bool(exit_.loc[timestamp]):
+            active = False
+        if bool(entry.loc[timestamp]):
+            active = True
+        values.append(active)
+    return pd.Series(values, index=entry.index, dtype=bool)
 
 
 def _evaluate_segment(
@@ -55,11 +68,7 @@ def evaluate_walk_forward(
     validation_policy: ValidationPolicy | None = None,
     fitness_policy: FitnessPolicy | None = None,
 ) -> WalkForwardEvaluation:
-    """Evaluate fixed strategy parameters on chronological train/validation/OOS windows.
-
-    Each segment is compiled independently, preventing future observations from entering
-    indicator state. Promotion requires every train, validation, and OOS segment to pass.
-    """
+    """Evaluate fixed strategy parameters on chronological train/validation/OOS windows."""
     windows: list[WalkForwardWindow] = walk_forward_windows(
         data, train_size, validation_size, test_size, step_size
     )
@@ -80,7 +89,12 @@ def evaluate_walk_forward(
             window.test, strategy, backtest_config, validation_policy, fitness_policy
         )
         evaluations.extend((train, validation, test))
-        all_passed = all_passed and train.fitness.eligible and validation.fitness.eligible and test.fitness.eligible
+        all_passed = (
+            all_passed
+            and train.fitness.eligible
+            and validation.fitness.eligible
+            and test.fitness.eligible
+        )
         oos_returns.append(test.backtest.equity.pct_change().fillna(0.0))
 
     combined_oos = pd.concat(oos_returns).sort_index()
