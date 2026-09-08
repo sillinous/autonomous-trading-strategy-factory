@@ -1,7 +1,11 @@
 import pandas as pd
 import pytest
 
-from atsf.robustness import monte_carlo_trade_bootstrap, regime_returns
+from atsf.robustness import (
+    monte_carlo_trade_bootstrap,
+    regime_returns,
+    score_regime_stability,
+)
 
 
 def test_monte_carlo_is_reproducible():
@@ -24,3 +28,15 @@ def test_regime_returns_preserves_index_and_partitions():
     assert set(regimes) == {"rising", "falling", "high_volatility", "low_volatility"}
     assert regimes["rising"].index.equals(index)
     assert regimes["falling"].empty
+
+
+def test_regime_stability_uses_weakest_covered_regime():
+    regimes = {
+        "rising": pd.Series([0.02, 0.01]),
+        "falling": pd.Series([-0.01, 0.02]),
+        "empty": pd.Series(dtype=float),
+    }
+    result = score_regime_stability(regimes)
+    assert result.covered_regimes == ("falling", "rising")
+    assert result.score < 0
+    assert result.regime_returns["falling"] < result.regime_returns["rising"]
