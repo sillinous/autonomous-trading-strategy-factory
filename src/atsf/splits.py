@@ -60,7 +60,7 @@ def walk_forward_windows(
         raise ValueError("data index must be monotonically increasing")
     if min(train_size, validation_size, test_size) <= 0:
         raise ValueError("window sizes must be positive")
-    step = step_size or test_size
+    step = 1 if step_size is None else step_size
     if step <= 0:
         raise ValueError("step_size must be positive")
 
