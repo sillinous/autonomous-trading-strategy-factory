@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from random import Random
 
@@ -16,8 +18,11 @@ class Candidate:
 
 
 def strategy_id(strategy: StrategySpec) -> str:
-    """Return a stable identity for the canonical strategy definition."""
-    return strategy.model_dump_json(sort_keys=True)
+    """Return a compact stable identity for the canonical strategy definition."""
+    payload = json.dumps(
+        strategy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
