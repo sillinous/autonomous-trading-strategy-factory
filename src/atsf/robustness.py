@@ -34,7 +34,8 @@ def monte_carlo_trade_bootstrap(
     if not 0 <= lower_percentile <= 100:
         raise ValueError("lower_percentile must be between 0 and 100")
     returns = np.asarray(trade_returns, dtype=float)
-    returns = returns[np.isfinite(returns)]
+    if not np.isfinite(returns).all():
+        raise ValueError("trade_returns must contain only finite values")
     if returns.size == 0:
         raise ValueError("trade_returns must contain at least one finite value")
     if np.any(returns <= -1):
@@ -84,11 +85,12 @@ def test_robustness(
     candidate: StrategyCandidate,
     scenarios: tuple[RobustnessScenario, ...] | None = None,
     min_equity_ratio: float = 0.90,
+    config: BacktestConfig | None = None,
 ) -> RobustnessResult:
     """Stress transaction costs and slippage without changing strategy logic."""
     if min_equity_ratio <= 0 or min_equity_ratio > 1:
         raise ValueError("min_equity_ratio must be in (0, 1]")
-    selected = scenarios or default_scenarios()
+    selected = scenarios or default_scenarios(config)
     if not selected:
         raise ValueError("scenarios cannot be empty")
     entry, _ = strategy_signals(data, candidate.strategy)
@@ -99,10 +101,13 @@ def test_robustness(
     baseline = next((result for name, result in results if name == "baseline"), results[0][1])
     baseline_equity = float(baseline.equity.iloc[-1])
     reasons = []
-    if baseline_equity <= 0:
-        reasons.append("baseline equity is non-positive")
+    if baseline_equity <= 0 or not np.isfinite(baseline_equity):
+        reasons.append("baseline equity is non-positive or non-finite")
     for name, result in results:
-        if float(result.equity.iloc[-1]) < baseline_equity * min_equity_ratio:
+        final_equity = float(result.equity.iloc[-1])
+        if not np.isfinite(final_equity):
+            reasons.append(f"{name} equity is non-finite")
+        elif final_equity < baseline_equity * min_equity_ratio:
             reasons.append(f"{name} equity fell below robustness threshold")
     return RobustnessResult(candidate.candidate_id, baseline, results, not reasons, tuple(reasons))
 
