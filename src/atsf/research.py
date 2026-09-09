@@ -105,6 +105,17 @@ def run_research(
                             "regime_returns": evaluation.regime.regime_returns,
                             "covered_regimes": evaluation.regime.covered_regimes,
                         },
+                        "robustness": {
+                            "passed": evaluation.robustness.passed,
+                            "reasons": evaluation.robustness.reasons,
+                            "scenarios": {
+                                name: {
+                                    "total_return": result.total_return,
+                                    "max_drawdown": result.max_drawdown,
+                                }
+                                for name, result in evaluation.robustness.scenarios
+                            },
+                        },
                         "promotion": {
                             "stage": evaluation.promotion.stage,
                             "eligible": evaluation.promotion.eligible,
