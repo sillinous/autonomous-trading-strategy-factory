@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
 from random import Random
 
-from .strategy import StrategySpec
+from .research_queue import ResearchRequest
+from .strategy import (
+    Comparator,
+    Condition,
+    Indicator,
+    PositionSizing,
+    RiskLimits,
+    Signal,
+    StrategySpec,
+)
 
 DEFAULT_PERIODS = (5, 10, 14, 20, 50, 100, 200)
 
@@ -17,9 +29,7 @@ def mutate_indicator_period(strategy: StrategySpec, rng: Random | None = None) -
     new = old.model_copy(update={"period": rng.choice(DEFAULT_PERIODS)})
     indicators = list(strategy.indicators)
     indicators[index] = new
-    return strategy.model_copy(
-        update={"version": strategy.version + 1, "indicators": indicators}
-    )
+    return strategy.model_copy(update={"version": strategy.version + 1, "indicators": indicators})
 
 
 def mutate_threshold(strategy: StrategySpec, rng: Random | None = None) -> StrategySpec:
@@ -33,9 +43,57 @@ def mutate_threshold(strategy: StrategySpec, rng: Random | None = None) -> Strat
     if not isinstance(condition.right, (int, float)) or isinstance(condition.right, bool):
         raise TypeError("selected condition has no numeric threshold")
     factor = 1.0 + rng.uniform(-0.10, 0.10)
-    updated = condition.model_copy(update={"right": condition.right * factor})
-    conditions[index] = updated
+    conditions[index] = condition.model_copy(update={"right": condition.right * factor})
     entry = strategy.entry.model_copy(update={"all": conditions})
-    return strategy.model_copy(
-        update={"version": strategy.version + 1, "entry": entry}
-    )
+    return strategy.model_copy(update={"version": strategy.version + 1, "entry": entry})
+
+
+@dataclass(frozen=True)
+class StrategyCandidate:
+    strategy: StrategySpec
+    request_id: str
+    parent_strategy_id: str | None
+    mutation: str
+    candidate_id: str
+
+
+class StrategyGenerator:
+    """Deterministic, constrained candidate generator with provenance."""
+
+    def generate(
+        self, request: ResearchRequest, symbols: list[str]
+    ) -> tuple[StrategyCandidate, ...]:
+        if not symbols:
+            raise ValueError("symbols cannot be empty")
+        constraints = set(request.constraints)
+        candidates: list[StrategyCandidate] = []
+        variants = (("sma_fast", "sma", 10, 30), ("ema_fast", "ema", 10, 30), ("sma_slow", "sma", 20, 60))
+        for name, kind, fast, slow in variants:
+            if "trend_only" in constraints and name == "sma_slow":
+                continue
+            fast_name = f"{name}_indicator"
+            spec = StrategySpec(
+                name=f"generated-{request.request_id}-{name}",
+                universe=symbols,
+                indicators=[
+                    Indicator(name=fast_name, source="close", period=fast, kind=kind),
+                    Indicator(name="slow_indicator", source="close", period=slow, kind="sma"),
+                ],
+                entry=Signal(all=[Condition(left=fast_name, comparator=Comparator.GT, right="slow_indicator")]),
+                exit=Signal(all=[Condition(left=fast_name, comparator=Comparator.LT, right="slow_indicator")]),
+                position_sizing=PositionSizing(method="fixed_fraction", value=0.25, max_position=0.25),
+                risk=RiskLimits(max_position=0.25),
+            )
+            payload = {
+                "request_id": request.request_id,
+                "parent": request.source_strategy_id,
+                "mutation": name,
+                "strategy": spec.model_dump(mode="json"),
+            }
+            candidate_id = hashlib.sha256(
+                json.dumps(payload, sort_keys=True).encode()
+            ).hexdigest()[:16]
+            candidates.append(
+                StrategyCandidate(spec, request.request_id, request.source_strategy_id, name, candidate_id)
+            )
+        return tuple(candidates)
