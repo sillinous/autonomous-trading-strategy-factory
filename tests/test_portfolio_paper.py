@@ -64,3 +64,38 @@ def test_portfolio_paper_runner_rejects_excess_exposure():
             {"a": 0.75, "b": 0.75},
             decisions={"a": approved(), "b": approved()},
         )
+
+
+def test_portfolio_paper_runner_rejects_misaligned_timestamps():
+    first = pd.date_range("2025-01-01", periods=4)
+    second = pd.date_range("2025-01-01", periods=4, freq="2D")
+    with pytest.raises(ValueError, match="same timestamps"):
+        run_paper_portfolio(
+            {
+                "a": pd.DataFrame({"close": [100, 101, 102, 103]}, index=first),
+                "b": pd.DataFrame({"close": [100, 101, 102, 103]}, index=second),
+            },
+            {"a": make_strategy("a"), "b": make_strategy("b")},
+            {"a": 0.5, "b": 0.5},
+            decisions={"a": approved(), "b": approved()},
+        )
+
+
+def test_portfolio_paper_runner_liquidates_on_risk_halt():
+    index = pd.date_range("2025-01-01", periods=5)
+    data = {
+        "a": pd.DataFrame({"close": [100, 100, 100, 50, 50]}, index=index),
+    }
+    result = run_paper_portfolio(
+        data,
+        {"a": make_strategy("a")},
+        {"a": 1.0},
+        decisions={"a": approved()},
+        max_drawdown=0.10,
+    )
+    assert result.halted
+    assert result.halt_reason
+    assert result.fills
+    assert result.fills[-1][0] == "a"
+    assert result.fills[-1][1].side == "sell"
+    assert result.final_equity > 0
