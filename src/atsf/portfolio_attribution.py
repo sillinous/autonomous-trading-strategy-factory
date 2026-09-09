@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+import math
 
 import numpy as np
 import pandas as pd
@@ -25,39 +25,40 @@ def attribute_portfolio(
     returns: pd.DataFrame,
     weights: dict[str, float],
 ) -> PortfolioAttribution:
-    """Attribute portfolio return and volatility to fixed-weight strategy sleeves."""
-    if returns.empty:
-        raise ValueError("returns cannot be empty")
-    if not weights:
-        raise ValueError("weights cannot be empty")
+    """Attribute fixed-weight portfolio return and marginal volatility."""
+    if returns.empty or not weights:
+        raise ValueError("returns and weights cannot be empty")
     if set(weights) != set(returns.columns):
         raise ValueError("weights and returns must contain the same strategy IDs")
-    if any(not math.isfinite(weight) or weight < 0 for weight in weights.values()):
+    if any(not math.isfinite(w) or w < 0 for w in weights.values()):
         raise ValueError("weights must be finite and non-negative")
     if sum(weights.values()) > 1.0 + 1e-12:
         raise ValueError("weights exceed 100% gross exposure")
-    selected = returns[list(weights)].astype(float)
-    if not selected.map(math.isfinite).all().all():
-        raise ValueError("returns must contain only finite values")
-    weight_vector = np.array([weights[sid] for sid in weights], dtype=float)
-    daily = selected.to_numpy() @ weight_vector
-    portfolio_returns = pd.Series(daily, index=returns.index)
-    equity = (1.0 + portfolio_returns).cumprod()
-    total_return = float(equity.iloc[-1] - 1.0)
-    volatility = float(portfolio_returns.std(ddof=1)) if len(portfolio_returns) > 1 else 0.0
 
-    prior_equity = equity.shift(1, fill_value=1.0).to_numpy()
-    contribution_values = selected.to_numpy() * weight_vector * prior_equity[:, None]
-    contributions = contribution_values.sum(axis=0)
+    selected = returns[list(weights)].astype(float)
+    if not np.isfinite(selected.to_numpy()).all():
+        raise ValueError("returns must contain only finite values")
+
+    w = np.array([weights[sid] for sid in weights], dtype=float)
+    daily = selected.to_numpy() @ w
+    series = pd.Series(daily, index=returns.index)
+    total_return = float((1.0 + series).prod() - 1.0)
+    volatility = float(series.std(ddof=1)) if len(series) > 1 else 0.0
+
     covariance = selected.cov().to_numpy()
-    portfolio_variance = float(weight_vector @ covariance @ weight_vector)
-    portfolio_vol = math.sqrt(max(portfolio_variance, 0.0))
-    if portfolio_vol > 0:
-        risk_values = weight_vector * (covariance @ weight_vector) / portfolio_vol
+    variance = float(w @ covariance @ w)
+    portfolio_vol = float(np.sqrt(max(variance, 0.0)))
+    if portfolio_vol:
+        risk = w * (covariance @ w) / portfolio_vol
     else:
-        risk_values = np.zeros(len(weight_vector))
-    result = tuple(
-        StrategyAttribution(sid, float(contribution), float(risk))
-        for sid, contribution, risk in zip(weights, contributions, risk_values, strict=True)
+        risk = np.zeros(len(w))
+
+    contributions = (selected.to_numpy() * w).sum(axis=0)
+    return PortfolioAttribution(
+        total_return,
+        volatility,
+        tuple(
+            StrategyAttribution(sid, float(ret), float(rc))
+            for sid, ret, rc in zip(weights, contributions, risk, strict=True)
+        ),
     )
-    return PortfolioAttribution(total_return, volatility, result)
