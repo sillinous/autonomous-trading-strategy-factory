@@ -60,12 +60,24 @@ def run_paper_portfolio(
         if not decision.eligible or decision.stage not in {"paper", "live"}:
             raise PermissionError(f"strategy {strategy_id} is not eligible for paper execution")
 
+    indexes = [frame.index for frame in data.values()]
+    if any(not isinstance(index, pd.DatetimeIndex) for index in indexes):
+        raise ValueError("all paper portfolio indexes must be DatetimeIndex")
+    if any(not index.is_monotonic_increasing or index.has_duplicates for index in indexes):
+        raise ValueError("all paper portfolio indexes must be sorted and unique")
+    reference_index = indexes[0]
+    if any(not index.equals(reference_index) for index in indexes[1:]):
+        raise ValueError("all paper portfolio datasets must use the same timestamps")
+
     brokers: dict[str, PaperBroker] = {}
     signals: dict[str, tuple[pd.Series, pd.Series]] = {}
     for strategy_id, strategy in strategies.items():
         frame = data[strategy_id]
         if frame.empty or "close" not in frame.columns:
             raise ValueError(f"data for {strategy_id} must contain a non-empty close column")
+        close = pd.to_numeric(frame["close"], errors="coerce")
+        if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
+            raise ValueError(f"data for {strategy_id} must contain finite positive close prices")
         brokers[strategy_id] = PaperBroker(
             PaperConfig(
                 initial_cash=initial_cash * weights[strategy_id],
@@ -75,19 +87,15 @@ def run_paper_portfolio(
         )
         signals[strategy_id] = strategy_signals(frame, strategy)
 
-    timestamps = sorted(set().union(*(set(frame.index) for frame in data.values())))
     risk = PaperRiskController(max_drawdown)
     reserve = initial_cash * (1.0 - total_weight)
     snapshots: list[PortfolioPaperSnapshot] = []
     fills: list[tuple[str, PaperFill]] = []
 
-    for timestamp in timestamps:
+    for timestamp in reference_index:
         equity = reserve
         for strategy_id, broker in brokers.items():
             frame = data[strategy_id]
-            if timestamp not in frame.index:
-                equity += broker.cash
-                continue
             price = float(frame.loc[timestamp, "close"])
             entry, exit_ = signals[strategy_id]
             if bool(entry.loc[timestamp]) and broker.position == 0:
@@ -97,11 +105,22 @@ def run_paper_portfolio(
             elif bool(exit_.loc[timestamp]) and broker.position > 0:
                 fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
             equity += broker.mark(timestamp, price).equity
+
         if not risk.check(equity):
+            for strategy_id, broker in brokers.items():
+                if broker.position > 0:
+                    price = float(data[strategy_id].loc[timestamp, "close"])
+                    fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
+            equity = reserve + sum(
+                broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity
+                for strategy_id, broker in brokers.items()
+            )
             snapshots.append(PortfolioPaperSnapshot(timestamp, equity, reserve))
             break
         snapshots.append(PortfolioPaperSnapshot(timestamp, equity, reserve))
 
+    if not snapshots:
+        raise ValueError("paper portfolio data cannot be empty")
     state = risk.state
     return PortfolioPaperResult(
         tuple(snapshots),
