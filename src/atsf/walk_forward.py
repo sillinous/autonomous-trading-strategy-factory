@@ -37,7 +37,7 @@ def walk_forward_validate(
     backtest_config: BacktestConfig | None = None,
     validation_policy: ValidationPolicy | None = None,
 ) -> WalkForwardResult:
-    """Evaluate a fixed strategy across sequential out-of-sample windows."""
+    """Evaluate a fixed strategy on sequential, causally isolated OOS windows."""
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive")
     step = step or test_size
@@ -46,14 +46,18 @@ def walk_forward_validate(
     if len(data) < train_size + test_size:
         raise ValueError("insufficient data for one walk-forward fold")
 
-    entry, _ = strategy_signals(data, candidate.strategy)
     folds: list[WalkForwardFold] = []
     start = 0
     while start + train_size + test_size <= len(data):
-        test_start = start + train_size
-        test_end = test_start + test_size
-        test_data = data.iloc[test_start:test_end]
-        test_signal = entry.iloc[test_start:test_end]
+        train_end = start + train_size
+        test_end = train_end + test_size
+
+        # Recompute indicators per fold from the fold's available history only.
+        context = data.iloc[start:test_end]
+        context_entry, _ = strategy_signals(context, candidate.strategy)
+        test_data = data.iloc[train_end:test_end]
+        test_signal = context_entry.iloc[-test_size:]
+
         result = run_long_signal_backtest(
             test_data, test_signal, candidate.strategy, backtest_config
         )
@@ -61,8 +65,8 @@ def walk_forward_validate(
         folds.append(
             WalkForwardFold(
                 data.index[start],
-                data.index[test_start - 1],
-                data.index[test_start],
+                data.index[train_end - 1],
+                data.index[train_end],
                 data.index[test_end - 1],
                 result,
                 validation,
@@ -70,7 +74,11 @@ def walk_forward_validate(
         )
         start += step
 
-    failures = [f"fold {i} failed validation" for i, fold in enumerate(folds) if not fold.validation.passed]
+    failures = [
+        f"fold {i} failed validation"
+        for i, fold in enumerate(folds)
+        if not fold.validation.passed
+    ]
     return WalkForwardResult(
         candidate.candidate_id,
         tuple(folds),
