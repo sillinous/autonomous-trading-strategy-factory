@@ -14,10 +14,13 @@ from .promotion import PromotionDecision, PromotionPolicy, research_to_paper
 from .robustness import (
     MonteCarloResult,
     RegimeStabilityResult,
+    RobustnessResult,
     monte_carlo_trade_bootstrap,
     regime_returns,
     score_regime_stability,
+    test_robustness,
 )
+from .signals import strategy_signals
 from .validation import ValidationPolicy
 
 
@@ -32,6 +35,7 @@ class CandidateEvaluation:
     monte_carlo: MonteCarloResult
     perturbation: PerturbationResult
     regime: RegimeStabilityResult
+    robustness: RobustnessResult
     promotion: PromotionDecision
 
 
@@ -48,7 +52,7 @@ def evaluate_candidate(
     benchmark: pd.Series | None = None,
     perturbation_samples: int = 20,
 ) -> CandidateEvaluation:
-    """Run one candidate through OOS and automatically generate promotion evidence."""
+    """Run one candidate through deterministic validation and promotion gates."""
     if candidate.strategy.side.value != "long":
         raise NotImplementedError("short-side execution is not implemented yet")
     if len(data) < 10:
@@ -114,11 +118,13 @@ def evaluate_candidate(
         raise ValueError("benchmark does not cover all OOS timestamps")
     regime = score_regime_stability(regime_returns(oos_equity, benchmark_series))
 
+    robustness = test_robustness(data, candidate, config=backtest_config)
     promotion = research_to_paper(
         walk_forward,
         monte_carlo,
         perturbation,
         regime,
+        robustness,
         promotion_policy,
     )
     fitness = FitnessResult(
@@ -146,5 +152,6 @@ def evaluate_candidate(
         monte_carlo=monte_carlo,
         perturbation=perturbation,
         regime=regime,
+        robustness=robustness,
         promotion=promotion,
     )
