@@ -5,7 +5,7 @@ from math import isfinite
 
 from .evaluation import WalkForwardEvaluation
 from .perturbation import PerturbationResult
-from .robustness import MonteCarloResult, RegimeStabilityResult
+from .robustness import MonteCarloResult, RegimeStabilityResult, RobustnessResult
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,9 @@ class PromotionPolicy:
     min_monte_carlo_lower_return: float = -0.10
     min_perturbation_pass_rate: float = 0.80
     min_regime_stability: float = -0.05
+    min_robustness_equity_ratio: float = 0.90
     require_walk_forward_pass: bool = True
+    require_robustness: bool = True
 
 
 @dataclass(frozen=True)
@@ -31,9 +33,10 @@ def research_to_paper(
     monte_carlo: MonteCarloResult,
     perturbation: PerturbationResult | None = None,
     regime: RegimeStabilityResult | None = None,
+    robustness: RobustnessResult | None = None,
     policy: PromotionPolicy | None = None,
 ) -> PromotionDecision:
-    """Apply deterministic robustness gates before paper trading."""
+    """Apply deterministic statistical and execution-robustness gates before paper trading."""
     policy = policy or PromotionPolicy()
     reasons: list[str] = []
     finite_metrics = (
@@ -62,6 +65,15 @@ def research_to_paper(
         reasons.append("regime stability evidence")
     elif not isfinite(regime.score) or regime.score < policy.min_regime_stability:
         reasons.append("regime stability is below the promotion minimum")
+    if policy.require_robustness and robustness is None:
+        reasons.append("execution robustness evidence")
+    elif robustness is not None:
+        if not robustness.passed:
+            reasons.extend(robustness.reasons)
+        else:
+            baseline_equity = float(robustness.baseline.equity.iloc[-1])
+            if baseline_equity <= 0 or not isfinite(baseline_equity):
+                reasons.append("robustness baseline equity is invalid")
     return PromotionDecision(
         stage="paper" if not reasons else "research",
         eligible=not reasons,
