@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from random import Random
 
 import numpy as np
 import pandas as pd
+
+from .backtest import BacktestConfig, BacktestResult, run_long_signal_backtest
+from .generator import StrategyCandidate
+from .signals import strategy_signals
 
 
 @dataclass(frozen=True)
@@ -35,21 +39,72 @@ def monte_carlo_trade_bootstrap(
         raise ValueError("trade_returns must contain at least one finite value")
     if np.any(returns <= -1):
         raise ValueError("trade returns must be greater than -100%")
-
     rng = Random(seed)
     outcomes = np.empty(simulations, dtype=float)
     for index in range(simulations):
         sample = [returns[rng.randrange(len(returns))] for _ in returns]
         outcomes[index] = float(np.prod(1.0 + np.asarray(sample)) - 1.0)
-
     return MonteCarloResult(
-        simulations=simulations,
-        seed=seed,
-        median_return=float(np.median(outcomes)),
-        worst_return=float(np.min(outcomes)),
-        lower_percentile_return=float(np.percentile(outcomes, lower_percentile)),
-        pass_rate=float(np.mean(outcomes >= min_return)),
+        simulations, seed, float(np.median(outcomes)), float(np.min(outcomes)),
+        float(np.percentile(outcomes, lower_percentile)),
+        float(np.mean(outcomes >= min_return)),
     )
+
+
+@dataclass(frozen=True)
+class RobustnessScenario:
+    name: str
+    config: BacktestConfig
+
+
+@dataclass(frozen=True)
+class RobustnessResult:
+    candidate_id: str
+    baseline: BacktestResult
+    scenarios: tuple[tuple[str, BacktestResult], ...]
+    passed: bool
+    reasons: tuple[str, ...]
+
+
+def default_scenarios(config: BacktestConfig | None = None) -> tuple[RobustnessScenario, ...]:
+    base = config or BacktestConfig()
+    return (
+        RobustnessScenario("baseline", base),
+        RobustnessScenario("cost_2x", replace(base, commission_bps=base.commission_bps * 2)),
+        RobustnessScenario("slippage_2x", replace(base, slippage_bps=base.slippage_bps * 2)),
+        RobustnessScenario(
+            "cost_slippage_2x",
+            replace(base, commission_bps=base.commission_bps * 2, slippage_bps=base.slippage_bps * 2),
+        ),
+    )
+
+
+def test_robustness(
+    data: pd.DataFrame,
+    candidate: StrategyCandidate,
+    scenarios: tuple[RobustnessScenario, ...] | None = None,
+    min_equity_ratio: float = 0.90,
+) -> RobustnessResult:
+    """Stress transaction costs and slippage without changing strategy logic."""
+    if min_equity_ratio <= 0 or min_equity_ratio > 1:
+        raise ValueError("min_equity_ratio must be in (0, 1]")
+    selected = scenarios or default_scenarios()
+    if not selected:
+        raise ValueError("scenarios cannot be empty")
+    entry, _ = strategy_signals(data, candidate.strategy)
+    results = tuple(
+        (scenario.name, run_long_signal_backtest(data, entry, candidate.strategy, scenario.config))
+        for scenario in selected
+    )
+    baseline = next((result for name, result in results if name == "baseline"), results[0][1])
+    baseline_equity = float(baseline.equity.iloc[-1])
+    reasons = []
+    if baseline_equity <= 0:
+        reasons.append("baseline equity is non-positive")
+    for name, result in results:
+        if float(result.equity.iloc[-1]) < baseline_equity * min_equity_ratio:
+            reasons.append(f"{name} equity fell below robustness threshold")
+    return RobustnessResult(candidate.candidate_id, baseline, results, not reasons, tuple(reasons))
 
 
 def regime_returns(
@@ -64,9 +119,7 @@ def regime_returns(
         raise ValueError("volatility_window must be greater than one")
     strategy_returns = equity.pct_change().fillna(0.0)
     benchmark_returns = benchmark.pct_change().fillna(0.0)
-    volatility = benchmark_returns.rolling(
-        volatility_window, min_periods=volatility_window
-    ).std()
+    volatility = benchmark_returns.rolling(volatility_window, min_periods=volatility_window).std()
     high_vol = volatility >= volatility.median()
     rising = benchmark_returns >= 0
     return {
@@ -90,16 +143,11 @@ def score_regime_stability(regimes: dict[str, pd.Series]) -> RegimeStabilityResu
         raise ValueError("regimes must not be empty")
     values: dict[str, float] = {}
     for name, returns in regimes.items():
-        finite = (
-            pd.to_numeric(returns, errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
-            .dropna()
-        )
+        finite = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
         if finite.empty:
             continue
-        values[name] = float(finite.min())
+        values[name] = float(finite.mean())
     if not values:
         raise ValueError("regimes contain no finite observations")
     covered = tuple(sorted(values))
-    score = float(min(values.values()))
-    return RegimeStabilityResult(score=score, regime_returns=values, covered_regimes=covered)
+    return RegimeStabilityResult(float(min(values.values())), values, covered)
