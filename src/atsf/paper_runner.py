@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from .compiler import CompiledStrategy, compile_strategy
 from .paper import PaperBroker, PaperConfig, PaperSnapshot
 from .paper_risk import PaperRiskController
-from .signals import strategy_signals
 from .strategy import StrategySpec
 
 
@@ -19,18 +19,18 @@ class PaperRunResult:
     halt_reason: str | None = None
 
 
-def run_paper_strategy(
+def run_compiled_paper_strategy(
     data: pd.DataFrame,
-    strategy: StrategySpec,
+    compiled: CompiledStrategy,
     *,
     config: PaperConfig | None = None,
 ) -> PaperRunResult:
-    """Run a StrategySpec through the deterministic paper broker only."""
+    """Run a compiled StrategySpec through the deterministic paper broker only."""
     if data.empty:
         raise ValueError("data cannot be empty")
-    entry, exit_ = strategy_signals(data, strategy)
+    entry, exit_ = compiled.signals(data)
     broker = PaperBroker(config)
-    risk = PaperRiskController(strategy.risk.max_drawdown)
+    risk = PaperRiskController(compiled.strategy.risk.max_drawdown)
     snapshots: list[PaperSnapshot] = []
     for timestamp, row in data.iterrows():
         price = float(row["close"])
@@ -39,7 +39,7 @@ def run_paper_strategy(
             snapshots.append(current)
             break
         if bool(entry.loc[timestamp]) and broker.position == 0:
-            quantity = broker.cash * strategy.position_sizing.max_position / price
+            quantity = broker.cash * compiled.strategy.position_sizing.max_position / price
             broker.execute(timestamp, "buy", quantity, price)
         elif bool(exit_.loc[timestamp]) and broker.position > 0:
             broker.execute(timestamp, "sell", broker.position, price)
@@ -48,8 +48,6 @@ def run_paper_strategy(
         if not risk.check(snapshot.equity):
             break
 
-    # Paper runs use an explicit end-of-sample liquidation so final equity is
-    # fully realized and trade statistics are not dependent on an open position.
     if snapshots and broker.position > 0 and not risk.state.halted:
         timestamp = data.index[-1]
         price = float(data.iloc[-1]["close"])
@@ -65,3 +63,13 @@ def run_paper_strategy(
         state.halted,
         state.reason,
     )
+
+
+def run_paper_strategy(
+    data: pd.DataFrame,
+    strategy: StrategySpec,
+    *,
+    config: PaperConfig | None = None,
+) -> PaperRunResult:
+    """Compile a validated strategy, then run only the compiled representation."""
+    return run_compiled_paper_strategy(data, compile_strategy(strategy), config=config)
