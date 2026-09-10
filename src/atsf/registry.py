@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .dataset_bundle import DatasetBundleIdentity
+from .dataset_registry import DatasetRecord, DatasetRegistry
 from .experiment import ExperimentResult, ExperimentSpec
 from .lineage import LineageRecord
 from .population import strategy_id
@@ -19,6 +21,7 @@ class ExperimentRegistry:
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._connection = sqlite3.connect(str(path))
         self._connection.row_factory = sqlite3.Row
+        self._datasets = DatasetRegistry(self._connection)
         self._create_schema()
 
     def _create_schema(self) -> None:
@@ -74,6 +77,15 @@ class ExperimentRegistry:
     def close(self) -> None:
         self._connection.close()
 
+    def register_dataset(self, identity: DatasetBundleIdentity, *, source: str) -> DatasetRecord:
+        return self._datasets.register(identity, source=source)
+
+    def get_dataset(self, dataset_id: str, version: str) -> DatasetRecord | None:
+        return self._datasets.get(dataset_id, version)
+
+    def require_dataset(self, dataset_id: str, version: str) -> DatasetRecord:
+        return self._datasets.require(dataset_id, version)
+
     def save_strategy(self, strategy: StrategySpec) -> str:
         identifier = strategy_id(strategy)
         payload = json.dumps(strategy.model_dump(mode="json"), sort_keys=True, allow_nan=False)
@@ -86,6 +98,7 @@ class ExperimentRegistry:
         return None if row is None else StrategySpec.model_validate(json.loads(row["definition_json"]))
 
     def save_experiment(self, spec: ExperimentSpec, result: ExperimentResult) -> None:
+        self.require_dataset(spec.dataset_id, spec.dataset_version)
         identifier = self.save_strategy(spec.strategy)
         self._connection.execute(
             "INSERT OR REPLACE INTO experiments(experiment_id, strategy_id, dataset_id, dataset_version, seed, status, score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -94,6 +107,8 @@ class ExperimentRegistry:
         self._connection.commit()
 
     def save_evaluation_evidence(self, experiment_id: str, evidence: dict[str, Any]) -> None:
+        if self.get_experiment(experiment_id) is None:
+            raise KeyError(f"unknown experiment: {experiment_id}")
         payload = json.dumps(evidence, sort_keys=True, allow_nan=False)
         self._connection.execute("INSERT OR REPLACE INTO evaluation_evidence(experiment_id, evidence_json) VALUES (?, ?)", (experiment_id, payload))
         self._connection.commit()
