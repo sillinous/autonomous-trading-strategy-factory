@@ -7,6 +7,7 @@ import pandas as pd
 
 from .paper import PaperBroker, PaperConfig
 from .portfolio_attribution import PortfolioAttribution
+from .portfolio_audit import PortfolioAuditEvent
 from .portfolio_paper import PortfolioPaperResult, run_paper_portfolio
 from .portfolio_run import PortfolioRunIdentity, attribute_run, build_portfolio_run_identity
 from .promotion import PromotionDecision
@@ -19,6 +20,7 @@ class PersistedPortfolioExecution:
     identity: PortfolioRunIdentity
     paper: PortfolioPaperResult
     attribution: PortfolioAttribution
+    audit_events: tuple[PortfolioAuditEvent, ...]
 
 
 def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commission_bps: float, slippage_bps: float) -> pd.Series:
@@ -94,14 +96,9 @@ def execute_persisted_portfolio(
         strategies[strategy_id] = strategy
 
     paper = run_paper_portfolio(
-        data,
-        strategies,
-        weights,
-        decisions=decisions,
-        initial_cash=initial_cash,
-        commission_bps=commission_bps,
-        slippage_bps=slippage_bps,
-        max_drawdown=max_drawdown,
+        data, strategies, weights, decisions=decisions,
+        initial_cash=initial_cash, commission_bps=commission_bps,
+        slippage_bps=slippage_bps, max_drawdown=max_drawdown,
     )
     identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights)
 
@@ -117,9 +114,20 @@ def execute_persisted_portfolio(
         raise ValueError("persisted portfolio has no positive-weight strategies")
     returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index()
     returns.columns = list(sleeve_returns)
-    active_weights = {key: weights[key] for key in sleeve_returns}
-    attribution = attribute_run(returns, active_weights)
+    attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
 
+    audit_events = tuple(
+        PortfolioAuditEvent(
+            sequence=sequence,
+            strategy_id=strategy_id,
+            action=fill.side,
+            timestamp=fill.timestamp.isoformat(),
+            quantity=float(fill.quantity),
+            price=float(fill.price),
+            fee=float(fill.fee),
+        )
+        for sequence, (strategy_id, fill) in enumerate(paper.fills)
+    )
     store.save_portfolio_run(
         identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason,
         [
@@ -128,4 +136,5 @@ def execute_persisted_portfolio(
             for item in attribution.contributions
         ],
     )
-    return PersistedPortfolioExecution(identity, paper, attribution)
+    store.save_portfolio_audit_events(identity.run_id, list(audit_events))
+    return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
