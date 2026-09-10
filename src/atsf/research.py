@@ -34,7 +34,11 @@ def _build_research_portfolio(
     dataset_version: str,
     store: ExperimentRegistry,
 ) -> str | None:
-    eligible = [evaluation for evaluation in result.evaluations if evaluation.promotion.eligible]
+    eligible = [
+        evaluation
+        for evaluation in result.evaluations
+        if evaluation.promotion.eligible
+    ]
     if not eligible:
         return None
 
@@ -77,6 +81,10 @@ def _build_research_portfolio(
         "dataset_id": dataset_id,
         "dataset_version": dataset_version,
         "generation": result.generation,
+        "experiment_ids": {
+            evaluation.candidate_id: evaluation.experiment.experiment_id
+            for evaluation in eligible
+        },
         "selection_policy": {
             "max_strategies": selection_policy.max_strategies,
             "max_average_correlation": selection_policy.max_average_correlation,
@@ -105,7 +113,12 @@ def _build_research_portfolio(
         "estimated_volatility": portfolio.allocation.estimated_volatility,
         "total_weight": portfolio.allocation.total_weight,
     }
-    canonical = json.dumps(definition, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    canonical = json.dumps(
+        definition,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
     portfolio_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
     store.save_portfolio(portfolio_id, definition, portfolio.allocation.weights)
     return portfolio_id
@@ -144,7 +157,9 @@ def run_research(
             store.save_strategy(candidate.strategy)
             store.save_lineage(candidate.lineage)
         for generation in range(generations):
-            candidates_by_id = {candidate.strategy_id: candidate for candidate in population}
+            candidates_by_id = {
+                candidate.strategy_id: candidate for candidate in population
+            }
             result = evolve_generation(
                 population,
                 data,
