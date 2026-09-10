@@ -8,7 +8,7 @@ import pandas as pd
 
 from .allocation import AllocationPolicy
 from .data import dataset_identity
-from .dataset_bundle import bundle_identity
+from .dataset_bundle import DATA_SCHEMA_VERSION, bundle_identity
 from .experiment import ExperimentSpec
 from .fitness import FitnessPolicy, FitnessResult
 from .population import Candidate, seed_population
@@ -35,6 +35,10 @@ def _build_research_portfolio(
     dataset_version: str,
     source_data: pd.DataFrame,
     store: ExperimentRegistry,
+    *,
+    source: str,
+    timeframe: str,
+    schema_version: str,
 ) -> str | None:
     eligible = [
         evaluation
@@ -79,12 +83,21 @@ def _build_research_portfolio(
         allocation_policy=allocation_policy,
     )
     data_bundle = {strategy_id: source_data for strategy_id in portfolio.allocation.weights}
-    bundle = bundle_identity(data_bundle, dataset_id)
+    bundle = bundle_identity(
+        data_bundle,
+        dataset_id,
+        source=source,
+        timeframe=timeframe,
+        schema_version=schema_version,
+    )
 
     definition = {
         "dataset_id": dataset_id,
         "dataset_version": dataset_version,
         "data_bundle_version": bundle.version,
+        "data_source": source,
+        "data_timeframe": timeframe,
+        "data_schema_version": schema_version,
         "generation": result.generation,
         "experiment_ids": {
             evaluation.candidate_id: evaluation.experiment.experiment_id
@@ -149,17 +162,29 @@ def run_research(
     if survivor_count > population_size:
         raise ValueError("survivor_count cannot exceed population_size")
     frame_identity = dataset_identity(data, dataset_id)
-    registered_identity = bundle_identity({"research": data}, dataset_id)
     population = seed_population(seeds)
     if not population:
         raise ValueError("seeds must contain at least one unique strategy")
+    timeframes = {candidate.strategy.timeframe for candidate in population}
+    if len(timeframes) != 1:
+        raise ValueError("all research strategies must use the same timeframe")
+    timeframe = next(iter(timeframes))
+    source = "research_input"
+    schema_version = DATA_SCHEMA_VERSION
+    registered_identity = bundle_identity(
+        {"research": data},
+        dataset_id,
+        source=source,
+        timeframe=timeframe,
+        schema_version=schema_version,
+    )
 
     owned_registry = registry is None
     store = registry or ExperimentRegistry()
     results: list[GenerationResult] = []
     portfolio_id: str | None = None
     try:
-        store.register_dataset(registered_identity, source="research_input")
+        store.register_dataset(registered_identity, source=source)
         store.require_dataset(registered_identity.dataset_id, registered_identity.version)
         for candidate in population:
             store.save_strategy(candidate.strategy)
@@ -243,6 +268,9 @@ def run_research(
                 registered_identity.version,
                 data,
                 store,
+                source=source,
+                timeframe=timeframe,
+                schema_version=schema_version,
             ) or portfolio_id
             for candidate in result.next_population:
                 store.save_strategy(candidate.strategy)
