@@ -10,6 +10,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 - Every experiment is reproducible and retains lineage.
 - AI proposes hypotheses; deterministic engines evaluate them.
 - Live execution is disabled until a strategy passes explicit promotion gates.
+- Persisted portfolios and paper runs are immutable and auditable.
 
 ## Initial scope
 
@@ -18,8 +19,23 @@ An experimental platform for autonomous quantitative strategy research, historic
 3. Metrics and validation framework
 4. Strategy generation/evolution
 5. Experiment registry
-6. Paper-trading execution boundary
+6. Deterministic strategy compiler
+7. Persisted portfolio construction and attribution
+8. Immutable paper-trading execution and audit ledger
+9. FastAPI service boundary for research artifacts and paper execution
+
+## Service
+
+The HTTP service is created by `atsf.api:create_app` and exposes health, capability, persisted portfolio, paper-run, and run-audit endpoints. It accepts market data only for execution against an already persisted portfolio; callers cannot submit arbitrary executable strategy code.
+
+For a local service using the default registry path:
+
+```bash
+uvicorn atsf.api:app --host 0.0.0.0 --port 8000
+```
+
+Set `ATSF_REGISTRY_PATH` to point the service at a persistent SQLite registry. The `/capabilities` endpoint explicitly reports `live_execution_enabled: false`; no live broker or live-order endpoint exists.
 
 ## Status
 
-Early foundation. This repository is intentionally research-first and does not constitute financial advice or a guarantee of profitability.
+Research-first foundation with deterministic paper execution. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
