@@ -247,6 +247,6 @@ def run_research(
         generations=tuple(results),
         final_population=tuple(population),
         dataset_id=identity.dataset_id,
-        dataset_version=identity.dataset_version,
+        dataset_version=identity.version,
         portfolio_id=portfolio_id,
     )
