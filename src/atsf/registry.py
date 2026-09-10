@@ -9,6 +9,7 @@ from typing import Any
 from .experiment import ExperimentResult, ExperimentSpec
 from .lineage import LineageRecord
 from .population import strategy_id
+from .portfolio_audit import PortfolioAuditEvent, audit_event_id
 from .strategy import StrategySpec
 
 
@@ -82,10 +83,27 @@ class ExperimentRegistry:
                 FOREIGN KEY (run_id) REFERENCES portfolio_runs(run_id),
                 FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id)
             );
+            CREATE TABLE IF NOT EXISTS portfolio_audit_events (
+                run_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                strategy_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                price REAL NOT NULL,
+                fee REAL NOT NULL,
+                PRIMARY KEY (run_id, event_id),
+                UNIQUE (run_id, sequence),
+                FOREIGN KEY (run_id) REFERENCES portfolio_runs(run_id),
+                FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_experiments_dataset
                 ON experiments(dataset_id, dataset_version);
             CREATE INDEX IF NOT EXISTS idx_experiments_strategy
                 ON experiments(strategy_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_audit_strategy
+                ON portfolio_audit_events(strategy_id, timestamp);
             """
         )
         self._connection.commit()
@@ -226,14 +244,41 @@ class ExperimentRegistry:
                  for item in attribution],
             )
 
+    def save_portfolio_audit_events(self, run_id: str, events: list[PortfolioAuditEvent]) -> None:
+        if self._connection.execute("SELECT 1 FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone() is None:
+            raise ValueError(f"unknown portfolio run: {run_id}")
+        seen: set[str] = set()
+        rows = []
+        for event in events:
+            event_id = audit_event_id(event)
+            if event_id in seen:
+                raise ValueError("duplicate audit event")
+            seen.add(event_id)
+            rows.append((run_id, event_id, event.sequence, event.strategy_id, event.action,
+                         event.timestamp, event.quantity, event.price, event.fee))
+        with self._connection:
+            self._connection.execute("DELETE FROM portfolio_audit_events WHERE run_id = ?", (run_id,))
+            self._connection.executemany(
+                """INSERT INTO portfolio_audit_events
+                (run_id, event_id, sequence, strategy_id, action, timestamp, quantity, price, fee)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+
     def get_portfolio_run(self, run_id: str) -> dict[str, Any] | None:
         row = self._connection.execute("SELECT * FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone()
         if row is None:
             return None
-        rows = self._connection.execute(
+        attribution = self._connection.execute(
             "SELECT strategy_id, return_contribution, risk_contribution FROM portfolio_attribution WHERE run_id = ? ORDER BY strategy_id",
+            (run_id,),
+        ).fetchall()
+        audit = self._connection.execute(
+            "SELECT event_id, sequence, strategy_id, action, timestamp, quantity, price, fee "
+            "FROM portfolio_audit_events WHERE run_id = ? ORDER BY sequence",
             (run_id,),
         ).fetchall()
         return {"run_id": row["run_id"], "portfolio_id": row["portfolio_id"],
                 "final_equity": row["final_equity"], "halted": bool(row["halted"]),
-                "halt_reason": row["halt_reason"], "attribution": [dict(item) for item in rows]}
+                "halt_reason": row["halt_reason"], "attribution": [dict(item) for item in attribution],
+                "audit_events": [dict(item) for item in audit]}
