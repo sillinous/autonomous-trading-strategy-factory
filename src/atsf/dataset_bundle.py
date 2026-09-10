@@ -20,9 +20,9 @@ class DatasetBundleIdentity:
     rows: int
     start: str
     end: str
-    source: str
-    timeframe: str
-    schema_version: str
+    source: str = "unspecified"
+    timeframe: str = "1d"
+    schema_version: str = DATA_SCHEMA_VERSION
 
 
 def bundle_identity(
@@ -47,10 +47,17 @@ def bundle_identity(
     if any(not symbol.strip() for symbol in data):
         raise ValueError("symbol identifiers cannot be empty")
 
+    normalized_source = source.strip()
+    normalized_timeframe = timeframe.strip()
+    normalized_schema = schema_version.strip()
     digest = hashlib.sha256()
     digest.update(
         json.dumps(
-            {"source": source.strip(), "timeframe": timeframe.strip(), "schema_version": schema_version.strip()},
+            {
+                "source": normalized_source,
+                "timeframe": normalized_timeframe,
+                "schema_version": normalized_schema,
+            },
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -74,7 +81,7 @@ def bundle_identity(
         rows=sum(item.rows for item in identities),
         start=min(starts),
         end=max(ends),
-        source=source.strip(),
-        timeframe=timeframe.strip(),
-        schema_version=schema_version.strip(),
+        source=normalized_source,
+        timeframe=normalized_timeframe,
+        schema_version=normalized_schema,
     )
