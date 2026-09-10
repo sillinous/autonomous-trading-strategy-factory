@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from math import isfinite
 
 import pandas as pd
 
+from .dataset_bundle import bundle_identity
 from .paper import PaperBroker, PaperConfig
 from .portfolio_attribution import PortfolioAttribution
 from .portfolio_audit import PortfolioAuditEvent
@@ -23,16 +22,6 @@ class PersistedPortfolioExecution:
     paper: PortfolioPaperResult
     attribution: PortfolioAttribution
     audit_events: tuple[PortfolioAuditEvent, ...]
-
-
-def _data_fingerprint(data: dict[str, pd.DataFrame]) -> str:
-    digest = hashlib.sha256()
-    for strategy_id in sorted(data):
-        frame = data[strategy_id].sort_index()
-        digest.update(strategy_id.encode())
-        digest.update(json.dumps(list(frame.columns), separators=(",", ":")).encode())
-        digest.update(pd.util.hash_pandas_object(frame, index=True).to_numpy().tobytes())
-    return digest.hexdigest()[:16]
 
 
 def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commission_bps: float, slippage_bps: float) -> pd.Series:
@@ -75,8 +64,15 @@ def execute_persisted_portfolio(
     if portfolio is None:
         raise ValueError(f"unknown portfolio: {portfolio_id}")
     definition = portfolio["definition"]
+    persisted_dataset_id = definition.get("dataset_id")
+    if not isinstance(persisted_dataset_id, str) or not persisted_dataset_id.strip():
+        raise ValueError("persisted portfolio is missing a valid dataset_id")
     if definition.get("dataset_version") != dataset_version:
         raise ValueError("dataset_version does not match the persisted portfolio")
+
+    bundle = bundle_identity(data, persisted_dataset_id)
+    if bundle.version != dataset_version:
+        raise ValueError("market data content does not match the persisted dataset version")
 
     weights = dict(portfolio["members"])
     if not weights or any(not isfinite(weight) or weight < 0 for weight in weights.values()):
@@ -109,14 +105,13 @@ def execute_persisted_portfolio(
         )
         strategies[strategy_id] = strategy
 
-    data_fingerprint = _data_fingerprint(data)
     execution_config = {
         "initial_cash": float(initial_cash), "commission_bps": float(commission_bps),
         "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown,
     }
     identity = build_portfolio_run_identity(
         portfolio_id, dataset_version, weights,
-        execution_config=execution_config, data_fingerprint=data_fingerprint,
+        execution_config=execution_config, data_fingerprint=bundle.version,
     )
     if store.get_portfolio_run(identity.run_id) is not None:
         raise ValueError("portfolio run already exists; execution is immutable")
