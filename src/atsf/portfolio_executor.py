@@ -73,6 +73,15 @@ def execute_persisted_portfolio(
     if definition.get("dataset_version") != dataset_version:
         raise ValueError("dataset_version does not match the persisted portfolio")
 
+    dataset = store.require_dataset(persisted_dataset_id, dataset_version)
+    for key, expected in (
+        ("data_source", dataset.source),
+        ("data_timeframe", dataset.timeframe),
+        ("data_schema_version", dataset.schema_version),
+    ):
+        if definition.get(key) != expected:
+            raise ValueError(f"persisted portfolio {key} does not match the registered dataset contract")
+
     weights = dict(portfolio["members"])
     if not weights or any(not isfinite(weight) or weight < 0 for weight in weights.values()):
         raise ValueError("persisted portfolio contains invalid weights")
@@ -81,7 +90,13 @@ def execute_persisted_portfolio(
     if set(data) != set(weights):
         raise ValueError("market data must contain exactly the persisted portfolio members")
 
-    bundle = bundle_identity(data, persisted_dataset_id)
+    bundle = bundle_identity(
+        data,
+        persisted_dataset_id,
+        source=dataset.source,
+        timeframe=dataset.timeframe,
+        schema_version=dataset.schema_version,
+    )
     if bundle.version != persisted_bundle_version:
         raise ValueError("market data content does not match the persisted data bundle version")
 
