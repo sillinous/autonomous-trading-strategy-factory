@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from math import isfinite
 
 import pandas as pd
 
@@ -28,8 +27,6 @@ def bundle_identity(data: dict[str, pd.DataFrame], dataset_id: str) -> DatasetBu
         raise ValueError("data bundle cannot be empty")
     if any(not symbol.strip() for symbol in data):
         raise ValueError("symbol identifiers cannot be empty")
-    if len(set(data)) != len(data):
-        raise ValueError("symbol identifiers must be unique")
 
     digest = hashlib.sha256()
     identities: list[DatasetIdentity] = []
