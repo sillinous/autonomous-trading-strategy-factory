@@ -38,6 +38,8 @@ def research_to_paper(
 ) -> PromotionDecision:
     """Apply deterministic statistical and execution-robustness gates before paper trading."""
     policy = policy or PromotionPolicy()
+    if not 0 < policy.min_robustness_equity_ratio <= 1:
+        raise ValueError("min_robustness_equity_ratio must be in (0, 1]")
     reasons: list[str] = []
     finite_metrics = (
         evaluation.oos_sharpe,
@@ -72,8 +74,17 @@ def research_to_paper(
             reasons.extend(robustness.reasons)
         else:
             baseline_equity = float(robustness.baseline.equity.iloc[-1])
+            stressed_equities = [
+                float(scenario.equity.iloc[-1]) for scenario in robustness.scenarios
+            ]
             if baseline_equity <= 0 or not isfinite(baseline_equity):
                 reasons.append("robustness baseline equity is invalid")
+            elif any(
+                not isfinite(equity)
+                or equity / baseline_equity < policy.min_robustness_equity_ratio
+                for equity in stressed_equities
+            ):
+                reasons.append("robustness equity ratio is below the promotion minimum")
     return PromotionDecision(
         stage="paper" if not reasons else "research",
         eligible=not reasons,
