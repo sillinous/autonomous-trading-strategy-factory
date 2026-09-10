@@ -89,3 +89,6 @@ def test_walk_forward_evaluation_covers_train_validation_and_oos():
     assert len(result.windows) == 3
     assert result.passed
     assert result.oos_return == 0.0
+    assert result.oos_returns is not None
+    assert result.oos_returns.index.is_unique
+    assert len(result.oos_returns) == 5
