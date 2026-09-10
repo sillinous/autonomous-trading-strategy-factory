@@ -1,4 +1,5 @@
 from atsf.catalog import promotion_ready_experiments
+from atsf.dataset_bundle import DatasetBundleIdentity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import (
@@ -28,6 +29,10 @@ def make_strategy(version: int) -> StrategySpec:
 
 def test_catalog_is_fail_closed_and_ranks_paper_candidates():
     registry = ExperimentRegistry()
+    registry.register_dataset(
+        DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        source="fixture",
+    )
     entries = []
     for version, score, eligible, status in (
         (1, 0.8, True, "paper"),
