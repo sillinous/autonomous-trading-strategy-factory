@@ -63,8 +63,7 @@ def test_executor_is_idempotency_guarded_and_data_changes_get_new_run_id():
     result = execute_persisted_portfolio(registry, "portfolio-1", data, dataset_version="v1")
     with pytest.raises(ValueError, match="already exists"):
         execute_persisted_portfolio(registry, "portfolio-1", data, dataset_version="v1")
-    changed = {first: make_data(), second: make_data(1.0)}
-    result_changed = execute_persisted_portfolio(registry, "portfolio-1", changed, dataset_version="v1")
+    result_changed = execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), second: make_data(1.0)}, dataset_version="v1")
     assert result_changed.identity.run_id != result.identity.run_id
     registry.close()
 
@@ -77,8 +76,14 @@ def test_executor_rejects_dataset_version_mismatch():
     registry.close()
 
 
-def test_registry_audit_ledger_requires_contiguous_member_events():
+def test_registry_audit_ledger_rejects_gaps_and_non_members():
     registry = ExperimentRegistry()
-    first, _ = seed_persisted_portfolio(registry)
-    result = execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), _ : make_data()}, dataset_version="v1")
+    first, _second = seed_persisted_portfolio(registry)
+    registry.save_portfolio_run("manual-run", "portfolio-1", 100_000.0, False, None, [])
+    event = PortfolioAuditEvent(1, first, "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.01)
+    with pytest.raises(ValueError, match="contiguous"):
+        registry.save_portfolio_audit_events("manual-run", [event])
+    unknown = PortfolioAuditEvent(0, "not-a-member", "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.01)
+    with pytest.raises(ValueError, match="persisted portfolio members"):
+        registry.save_portfolio_audit_events("manual-run", [unknown])
     registry.close()
