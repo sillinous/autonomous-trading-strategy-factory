@@ -1,0 +1,42 @@
+import pandas as pd
+import pytest
+
+from atsf.ingestion import ingest
+from atsf.provider import FrameMarketDataProvider
+
+
+def frame(offset: float = 0.0) -> pd.DataFrame:
+    index = pd.date_range("2026-01-01", periods=5, freq="D")
+    close = [100, 101, 102, 101, 103]
+    return pd.DataFrame(
+        {
+            "open": [value + offset for value in close],
+            "high": [value + 1 + offset for value in close],
+            "low": [value - 1 + offset for value in close],
+            "close": [value + offset for value in close],
+            "volume": [1000, 1100, 1200, 1300, 1400],
+        },
+        index=index,
+    )
+
+
+def test_ingest_returns_validated_fingerprinted_snapshot():
+    snapshot = ingest(FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)}), "market", ["BBB", "AAA"])
+    assert snapshot.dataset_id == "market"
+    assert snapshot.bundle.symbols == ("AAA", "BBB")
+    assert snapshot.bundle.rows == 10
+    assert set(snapshot.data) == {"AAA", "BBB"}
+
+
+def test_ingest_range_is_part_of_the_snapshot():
+    provider = FrameMarketDataProvider({"AAA": frame()})
+    full = ingest(provider, "market", ["AAA"])
+    partial = ingest(provider, "market", ["AAA"], start=pd.Timestamp("2026-01-02"))
+    assert full.bundle.version != partial.bundle.version
+    assert partial.bundle.rows == 4
+
+
+def test_ingest_rejects_duplicate_symbols():
+    provider = FrameMarketDataProvider({"AAA": frame()})
+    with pytest.raises(ValueError, match="unique"):
+        ingest(provider, "market", ["AAA", "AAA"])
