@@ -27,6 +27,7 @@ class WalkForwardEvaluation:
     oos_sharpe: float
     oos_drawdown: float
     oos_equity: pd.Series | None = None
+    oos_returns: pd.Series | None = None
     oos_trade_returns: tuple[float, ...] = ()
 
 
@@ -101,7 +102,10 @@ def evaluate_walk_forward(
         oos_returns.append(test.backtest.equity.pct_change().fillna(0.0))
         oos_trade_returns.extend(test.backtest.trade_returns)
 
+    # Default walk-forward windows overlap when step_size is smaller than test_size.
+    # Keep the first observation for each timestamp so OOS evidence is not double-counted.
     combined_oos = pd.concat(oos_returns).sort_index()
+    combined_oos = combined_oos[~combined_oos.index.duplicated(keep="first")]
     oos_equity = (1.0 + combined_oos).cumprod()
     oos_validation = validate_equity(oos_equity, validation_policy)
     return WalkForwardEvaluation(
@@ -111,5 +115,6 @@ def evaluate_walk_forward(
         oos_sharpe=oos_validation.sharpe,
         oos_drawdown=oos_validation.drawdown,
         oos_equity=oos_equity,
+        oos_returns=combined_oos,
         oos_trade_returns=tuple(oos_trade_returns),
     )
