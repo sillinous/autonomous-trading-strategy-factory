@@ -2,6 +2,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from atsf.api import create_app
+from atsf.dataset_bundle import DatasetBundleIdentity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
@@ -23,6 +24,10 @@ def make_strategy() -> StrategySpec:
 def seed(registry: ExperimentRegistry) -> str:
     strategy = make_strategy()
     strategy_id = registry.save_strategy(strategy)
+    registry.register_dataset(
+        DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        source="fixture",
+    )
     spec = ExperimentSpec(strategy, "prices", "v1", seed=1)
     registry.save_experiment(spec, ExperimentResult(spec.experiment_id, "paper", score=1.0))
     registry.save_evaluation_evidence(
