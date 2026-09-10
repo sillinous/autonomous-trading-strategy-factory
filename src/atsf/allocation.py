@@ -48,6 +48,8 @@ def allocate_inverse_volatility(
     if missing:
         raise ValueError(f"missing strategy returns: {missing}")
     selected = returns[list(strategy_ids)].astype(float)
+    if len(selected) < 2:
+        raise ValueError("at least two return observations are required")
     if not selected.map(math.isfinite).all().all():
         raise ValueError("strategy returns must contain only finite values")
     volatility = selected.std(ddof=1)
