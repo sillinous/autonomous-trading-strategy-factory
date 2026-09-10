@@ -11,6 +11,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 - AI proposes hypotheses; deterministic engines evaluate them.
 - Live execution is disabled until a strategy passes explicit promotion gates.
 - Persisted portfolios and paper runs are immutable and auditable.
+- Market-data access is provider-neutral; vendor adapters must normalize data through the canonical schema.
 
 ## Initial scope
 
@@ -23,6 +24,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 7. Persisted portfolio construction and attribution
 8. Immutable paper-trading execution and audit ledger
 9. FastAPI service boundary for research artifacts and paper execution
+10. Source-neutral market-data provider contract
 
 ## Service
 
@@ -35,6 +37,20 @@ uvicorn atsf.api:app --host 0.0.0.0 --port 8000
 ```
 
 Set `ATSF_REGISTRY_PATH` to point the service at a persistent SQLite registry. The `/capabilities` endpoint explicitly reports `live_execution_enabled: false`; no live broker or live-order endpoint exists.
+
+## Docker
+
+Build and run the paper-only service with:
+
+```bash
+docker compose up --build -d
+```
+
+The SQLite registry is stored in the named `atsf-data` volume. The container runs as a non-root user and includes an HTTP healthcheck.
+
+## Market-data providers
+
+`atsf.provider.MarketDataProvider` defines the vendor-neutral contract. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution. A production vendor adapter should fetch data, normalize it to the canonical OHLCV schema, call `validate_market_data`, and expose it through the same contract.
 
 ## Status
 
