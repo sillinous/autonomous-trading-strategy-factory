@@ -9,6 +9,9 @@ import pandas as pd
 from .data import DatasetIdentity, dataset_identity, validate_market_data
 
 
+DATA_SCHEMA_VERSION = "ohlcv.v1"
+
+
 @dataclass(frozen=True)
 class DatasetBundleIdentity:
     dataset_id: str
@@ -17,18 +20,41 @@ class DatasetBundleIdentity:
     rows: int
     start: str
     end: str
+    source: str
+    timeframe: str
+    schema_version: str
 
 
-def bundle_identity(data: dict[str, pd.DataFrame], dataset_id: str) -> DatasetBundleIdentity:
-    """Create a deterministic identity for a multi-symbol market-data snapshot."""
+def bundle_identity(
+    data: dict[str, pd.DataFrame],
+    dataset_id: str,
+    *,
+    source: str = "unspecified",
+    timeframe: str = "1d",
+    schema_version: str = DATA_SCHEMA_VERSION,
+) -> DatasetBundleIdentity:
+    """Create a deterministic identity for a market-data snapshot and its contract."""
     if not dataset_id.strip():
         raise ValueError("dataset_id cannot be empty")
     if not data:
         raise ValueError("data bundle cannot be empty")
+    if not source.strip():
+        raise ValueError("source cannot be empty")
+    if not timeframe.strip():
+        raise ValueError("timeframe cannot be empty")
+    if not schema_version.strip():
+        raise ValueError("schema_version cannot be empty")
     if any(not symbol.strip() for symbol in data):
         raise ValueError("symbol identifiers cannot be empty")
 
     digest = hashlib.sha256()
+    digest.update(
+        json.dumps(
+            {"source": source.strip(), "timeframe": timeframe.strip(), "schema_version": schema_version.strip()},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     identities: list[DatasetIdentity] = []
     for symbol in sorted(data):
         frame = validate_market_data(data[symbol])
@@ -48,4 +74,7 @@ def bundle_identity(data: dict[str, pd.DataFrame], dataset_id: str) -> DatasetBu
         rows=sum(item.rows for item in identities),
         start=min(starts),
         end=max(ends),
+        source=source.strip(),
+        timeframe=timeframe.strip(),
+        schema_version=schema_version.strip(),
     )
