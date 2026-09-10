@@ -32,6 +32,8 @@ def validate_market_data(data: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("market data index must be monotonically increasing")
     if data.index.has_duplicates:
         raise ValueError("market data index must not contain duplicates")
+    if data.index.tz is not None:
+        raise ValueError("market data index must be timezone-naive")
 
     normalized = data.loc[:, list(REQUIRED_COLUMNS)].copy()
     for column in REQUIRED_COLUMNS:
