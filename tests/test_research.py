@@ -62,7 +62,7 @@ def test_research_run_is_reproducible():
     assert all(len(result.next_population) == 4 for result in first.generations)
 
 
-def test_research_persists_experiment_evidence():
+def test_research_persists_experiment_evidence_and_dataset():
     registry = ExperimentRegistry()
     result = run_research(
         [make_strategy()],
@@ -75,8 +75,12 @@ def test_research_persists_experiment_evidence():
         registry=registry,
         fitness_policy=FitnessPolicy(min_sharpe=-1.0, max_drawdown=1.0),
     )
+    dataset = registry.require_dataset("fixture-prices", result.dataset_version)
+    assert dataset.source == "research_input"
+    assert dataset.symbols == ("research",)
     experiments = registry.list_experiments("fixture-prices")
     assert experiments
+    assert all(row["dataset_version"] == result.dataset_version for row in experiments)
     evidence = registry.get_evaluation_evidence(experiments[0]["experiment_id"])
     assert evidence is not None
     assert "walk_forward" in evidence
