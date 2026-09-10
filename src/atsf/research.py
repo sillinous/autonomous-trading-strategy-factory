@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 import pandas as pd
 
+from .allocation import AllocationPolicy
 from .data import dataset_identity
 from .experiment import ExperimentSpec
-from .fitness import FitnessPolicy
+from .fitness import FitnessPolicy, FitnessResult
 from .population import Candidate, seed_population
+from .portfolio import PortfolioPolicy
+from .portfolio_builder import build_portfolio
+from .ranking import rank_candidates
 from .registry import ExperimentRegistry
 from .scheduler import GenerationResult, evolve_generation
 from .strategy import StrategySpec
@@ -19,6 +25,90 @@ class ResearchRunResult:
     final_population: tuple[Candidate, ...]
     dataset_id: str
     dataset_version: str
+    portfolio_id: str | None = None
+
+
+def _build_research_portfolio(
+    result: GenerationResult,
+    dataset_id: str,
+    dataset_version: str,
+    store: ExperimentRegistry,
+) -> str | None:
+    eligible = [evaluation for evaluation in result.evaluations if evaluation.promotion.eligible]
+    if not eligible:
+        return None
+
+    return_series = {
+        evaluation.candidate_id: evaluation.walk_forward.oos_returns
+        for evaluation in eligible
+        if evaluation.walk_forward.oos_returns is not None
+    }
+    if not return_series:
+        return None
+    returns = pd.concat(return_series, axis=1, join="inner").sort_index()
+    returns.columns = list(return_series)
+    selection_policy = PortfolioPolicy()
+    if len(returns) < selection_policy.min_history:
+        return None
+
+    ranked_inputs = [
+        (
+            evaluation.candidate_id,
+            FitnessResult(
+                score=evaluation.fitness.score,
+                eligible=True,
+                reasons=evaluation.promotion.reasons,
+            ),
+            1.0 if evaluation.robustness.passed else 0.0,
+            0.0,
+        )
+        for evaluation in eligible
+    ]
+    ranked = rank_candidates(ranked_inputs)
+    allocation_policy = AllocationPolicy()
+    portfolio = build_portfolio(
+        ranked,
+        returns,
+        portfolio_policy=selection_policy,
+        allocation_policy=allocation_policy,
+    )
+
+    definition = {
+        "dataset_id": dataset_id,
+        "dataset_version": dataset_version,
+        "generation": result.generation,
+        "selection_policy": {
+            "max_strategies": selection_policy.max_strategies,
+            "max_average_correlation": selection_policy.max_average_correlation,
+            "min_history": selection_policy.min_history,
+        },
+        "allocation_policy": {
+            "max_total_weight": allocation_policy.max_total_weight,
+            "min_weight": allocation_policy.min_weight,
+            "max_weight": allocation_policy.max_weight,
+            "volatility_floor": allocation_policy.volatility_floor,
+        },
+        "ranked": [
+            {
+                "strategy_id": item.candidate_id,
+                "fitness_score": item.fitness_score,
+                "robustness_score": item.robustness_score,
+                "diversity_score": item.diversity_score,
+                "final_score": item.final_score,
+            }
+            for item in portfolio.ranked
+        ],
+        "selected": list(portfolio.selection.selected),
+        "rejected": list(portfolio.selection.rejected),
+        "average_correlation": portfolio.selection.average_correlation,
+        "weights": portfolio.allocation.weights,
+        "estimated_volatility": portfolio.allocation.estimated_volatility,
+        "total_weight": portfolio.allocation.total_weight,
+    }
+    canonical = json.dumps(definition, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    portfolio_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    store.save_portfolio(portfolio_id, definition, portfolio.allocation.weights)
+    return portfolio_id
 
 
 def run_research(
@@ -33,7 +123,7 @@ def run_research(
     registry: ExperimentRegistry | None = None,
     fitness_policy: FitnessPolicy | None = None,
 ) -> ResearchRunResult:
-    """Run a deterministic, research-only evolutionary search and optionally persist it."""
+    """Run deterministic evolutionary research and persist a reproducible portfolio when possible."""
     if generations <= 0:
         raise ValueError("generations must be positive")
     if population_size <= 0 or survivor_count <= 0:
@@ -48,6 +138,7 @@ def run_research(
     owned_registry = registry is None
     store = registry or ExperimentRegistry()
     results: list[GenerationResult] = []
+    portfolio_id: str | None = None
     try:
         for candidate in population:
             store.save_strategy(candidate.strategy)
@@ -110,10 +201,10 @@ def run_research(
                             "reasons": evaluation.robustness.reasons,
                             "scenarios": {
                                 name: {
-                                    "total_return": result.total_return,
-                                    "max_drawdown": result.max_drawdown,
+                                    "total_return": scenario.total_return,
+                                    "max_drawdown": scenario.max_drawdown,
                                 }
-                                for name, result in evaluation.robustness.scenarios
+                                for name, scenario in evaluation.robustness.scenarios
                             },
                         },
                         "promotion": {
@@ -123,6 +214,12 @@ def run_research(
                         },
                     },
                 )
+            portfolio_id = _build_research_portfolio(
+                result,
+                identity.dataset_id,
+                identity.version,
+                store,
+            ) or portfolio_id
             for candidate in result.next_population:
                 store.save_strategy(candidate.strategy)
                 store.save_lineage(candidate.lineage)
@@ -136,4 +233,5 @@ def run_research(
         final_population=tuple(population),
         dataset_id=identity.dataset_id,
         dataset_version=identity.version,
+        portfolio_id=portfolio_id,
     )
