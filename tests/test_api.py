@@ -105,12 +105,27 @@ def test_paper_run_endpoint_executes_persisted_portfolio():
     registry.close()
 
 
-def test_paper_run_endpoint_rejects_unknown_portfolio():
+def test_paper_run_endpoint_rejects_unknown_portfolio_with_not_found():
     registry = ExperimentRegistry()
     client = TestClient(create_app(registry))
     response = client.post(
         "/portfolios/missing/paper-runs",
         json={"dataset_version": "v1", "data": {"missing": bars()}},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "portfolio not found"
+    registry.close()
+
+
+def test_paper_run_endpoint_rejects_invalid_market_data_with_bad_request():
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    client = TestClient(create_app(registry))
+    invalid = bars()
+    invalid[1]["high"] = 0.0
+    response = client.post(
+        "/portfolios/portfolio-1/paper-runs",
+        json={"dataset_version": "v1", "data": {strategy_id: invalid}},
     )
     assert response.status_code == 400
     registry.close()
