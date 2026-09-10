@@ -37,10 +37,10 @@ def seed(registry: ExperimentRegistry) -> str:
     return strategy_id
 
 
-def bars() -> list[dict]:
+def bars(count: int = 4) -> list[dict]:
     frame = pd.DataFrame(
-        {"close": [1.0, 3.0, 2.0, 0.5]},
-        index=pd.date_range("2026-01-01", periods=4),
+        {"close": [1.0 + (index % 3) for index in range(count)]},
+        index=pd.date_range("2026-01-01", periods=count),
     )
     return [
         {
@@ -60,6 +60,30 @@ def test_health_and_capabilities_are_paper_only():
     client = TestClient(create_app(registry))
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/capabilities").json() == {"live_execution_enabled": False}
+    registry.close()
+
+
+def test_research_run_endpoint_persists_research_artifacts():
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    response = client.post(
+        "/research/runs",
+        json={
+            "dataset_id": "research-prices",
+            "data": bars(30),
+            "seeds": [make_strategy().model_dump(mode="json")],
+            "generations": 1,
+            "population_size": 1,
+            "survivor_count": 1,
+            "seed": 7,
+        },
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["dataset_id"] == "research-prices"
+    assert len(payload["dataset_version"]) == 16
+    assert payload["generations"] == 1
+    assert payload["final_population_size"] == 1
     registry.close()
 
 
