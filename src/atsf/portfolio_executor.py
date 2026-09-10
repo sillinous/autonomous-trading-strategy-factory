@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from math import isfinite
 
@@ -21,6 +23,16 @@ class PersistedPortfolioExecution:
     paper: PortfolioPaperResult
     attribution: PortfolioAttribution
     audit_events: tuple[PortfolioAuditEvent, ...]
+
+
+def _data_fingerprint(data: dict[str, pd.DataFrame]) -> str:
+    digest = hashlib.sha256()
+    for strategy_id in sorted(data):
+        frame = data[strategy_id].sort_index()
+        digest.update(strategy_id.encode())
+        digest.update(json.dumps(list(frame.columns), separators=(",", ":")).encode())
+        digest.update(pd.util.hash_pandas_object(frame, index=True).to_numpy().tobytes())
+    return digest.hexdigest()[:16]
 
 
 def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commission_bps: float, slippage_bps: float) -> pd.Series:
@@ -73,6 +85,10 @@ def execute_persisted_portfolio(
         raise ValueError("persisted portfolio weights exceed 100% gross exposure")
     if set(data) != set(weights):
         raise ValueError("market data must contain exactly the persisted portfolio members")
+    if not isfinite(initial_cash) or initial_cash <= 0 or not isfinite(commission_bps) or commission_bps < 0 or not isfinite(slippage_bps) or slippage_bps < 0:
+        raise ValueError("execution parameters must be finite and valid")
+    if max_drawdown is not None and (not isfinite(max_drawdown) or not 0 < max_drawdown < 1):
+        raise ValueError("max_drawdown must be between zero and one")
 
     experiment_ids = definition.get("experiment_ids", {})
     if set(experiment_ids) != set(weights):
@@ -89,18 +105,27 @@ def execute_persisted_portfolio(
             raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
         promotion = evidence["promotion"]
         decisions[strategy_id] = PromotionDecision(
-            stage=str(promotion["stage"]),
-            eligible=bool(promotion["eligible"]),
-            reasons=tuple(promotion.get("reasons", ())),
+            stage=str(promotion["stage"]), eligible=bool(promotion["eligible"]), reasons=tuple(promotion.get("reasons", ())),
         )
         strategies[strategy_id] = strategy
+
+    data_fingerprint = _data_fingerprint(data)
+    execution_config = {
+        "initial_cash": float(initial_cash), "commission_bps": float(commission_bps),
+        "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown,
+    }
+    identity = build_portfolio_run_identity(
+        portfolio_id, dataset_version, weights,
+        execution_config=execution_config, data_fingerprint=data_fingerprint,
+    )
+    if store.get_portfolio_run(identity.run_id) is not None:
+        raise ValueError("portfolio run already exists; execution is immutable")
 
     paper = run_paper_portfolio(
         data, strategies, weights, decisions=decisions,
         initial_cash=initial_cash, commission_bps=commission_bps,
         slippage_bps=slippage_bps, max_drawdown=max_drawdown,
     )
-    identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights)
 
     sleeve_returns = {
         strategy_id: _sleeve_returns(
@@ -117,24 +142,15 @@ def execute_persisted_portfolio(
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
 
     audit_events = tuple(
-        PortfolioAuditEvent(
-            sequence=sequence,
-            strategy_id=strategy_id,
-            action=fill.side,
-            timestamp=fill.timestamp.isoformat(),
-            quantity=float(fill.quantity),
-            price=float(fill.price),
-            fee=float(fill.fee),
-        )
+        PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side,
+                            timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity),
+                            price=float(fill.price), fee=float(fill.fee))
         for sequence, (strategy_id, fill) in enumerate(paper.fills)
     )
     store.save_portfolio_run(
         identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason,
-        [
-            {"strategy_id": item.strategy_id, "return_contribution": item.return_contribution,
-             "risk_contribution": item.risk_contribution}
-            for item in attribution.contributions
-        ],
+        [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution,
+          "risk_contribution": item.risk_contribution} for item in attribution.contributions],
     )
     store.save_portfolio_audit_events(identity.run_id, list(audit_events))
     return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
