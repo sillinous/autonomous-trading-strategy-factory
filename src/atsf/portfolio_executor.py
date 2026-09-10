@@ -65,14 +65,13 @@ def execute_persisted_portfolio(
         raise ValueError(f"unknown portfolio: {portfolio_id}")
     definition = portfolio["definition"]
     persisted_dataset_id = definition.get("dataset_id")
+    persisted_bundle_version = definition.get("data_bundle_version")
     if not isinstance(persisted_dataset_id, str) or not persisted_dataset_id.strip():
         raise ValueError("persisted portfolio is missing a valid dataset_id")
+    if not isinstance(persisted_bundle_version, str) or not persisted_bundle_version:
+        raise ValueError("persisted portfolio is missing a data_bundle_version")
     if definition.get("dataset_version") != dataset_version:
         raise ValueError("dataset_version does not match the persisted portfolio")
-
-    bundle = bundle_identity(data, persisted_dataset_id)
-    if bundle.version != dataset_version:
-        raise ValueError("market data content does not match the persisted dataset version")
 
     weights = dict(portfolio["members"])
     if not weights or any(not isfinite(weight) or weight < 0 for weight in weights.values()):
@@ -81,6 +80,11 @@ def execute_persisted_portfolio(
         raise ValueError("persisted portfolio weights exceed 100% gross exposure")
     if set(data) != set(weights):
         raise ValueError("market data must contain exactly the persisted portfolio members")
+
+    bundle = bundle_identity(data, persisted_dataset_id)
+    if bundle.version != persisted_bundle_version:
+        raise ValueError("market data content does not match the persisted data bundle version")
+
     if not isfinite(initial_cash) or initial_cash <= 0 or not isfinite(commission_bps) or commission_bps < 0 or not isfinite(slippage_bps) or slippage_bps < 0:
         raise ValueError("execution parameters must be finite and valid")
     if max_drawdown is not None and (not isfinite(max_drawdown) or not 0 < max_drawdown < 1):
