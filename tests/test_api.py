@@ -1,0 +1,92 @@
+import pandas as pd
+from fastapi.testclient import TestClient
+
+from atsf.api import create_app
+from atsf.experiment import ExperimentResult, ExperimentSpec
+from atsf.registry import ExperimentRegistry
+from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
+
+
+def make_strategy() -> StrategySpec:
+    return StrategySpec(
+        name="api-test",
+        version=1,
+        universe=["TEST"],
+        timeframe="1d",
+        entry=Signal(all=[Condition(left="close", comparator=Comparator.GT, right=2)]),
+        exit=Signal(all=[Condition(left="close", comparator=Comparator.LT, right=1)]),
+        position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
+        risk=RiskLimits(max_position=0.5),
+    )
+
+
+def seed(registry: ExperimentRegistry) -> str:
+    strategy = make_strategy()
+    strategy_id = registry.save_strategy(strategy)
+    spec = ExperimentSpec(strategy, "prices", "v1", seed=1)
+    registry.save_experiment(spec, ExperimentResult(spec.experiment_id, "paper", score=1.0))
+    registry.save_evaluation_evidence(
+        spec.experiment_id,
+        {"promotion": {"stage": "paper", "eligible": True, "reasons": []}},
+    )
+    registry.save_portfolio(
+        "portfolio-1",
+        {"dataset_id": "prices", "dataset_version": "v1", "experiment_ids": {strategy_id: spec.experiment_id}},
+        {strategy_id: 1.0},
+    )
+    return strategy_id
+
+
+def bars() -> list[dict]:
+    frame = pd.DataFrame(
+        {"close": [1.0, 3.0, 2.0, 0.5]},
+        index=pd.date_range("2026-01-01", periods=4),
+    )
+    return [
+        {
+            "timestamp": timestamp.isoformat(),
+            "open": value,
+            "high": value,
+            "low": value,
+            "close": value,
+            "volume": 1.0,
+        }
+        for timestamp, value in frame["close"].items()
+    ]
+
+
+def test_health_and_capabilities_are_paper_only():
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/capabilities").json() == {"live_execution_enabled": False}
+    registry.close()
+
+
+def test_paper_run_endpoint_executes_persisted_portfolio():
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    client = TestClient(create_app(registry))
+    response = client.post(
+        "/portfolios/portfolio-1/paper-runs",
+        json={"dataset_version": "v1", "data": {strategy_id: bars()}},
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["portfolio_id"] == "portfolio-1"
+    assert payload["final_equity"] > 0
+    assert payload["execution_fingerprint"]
+    assert payload["audit_event_count"] == payload["fill_count"]
+    assert client.get(f"/runs/{payload['run_id']}").status_code == 200
+    registry.close()
+
+
+def test_paper_run_endpoint_rejects_unknown_portfolio():
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    response = client.post(
+        "/portfolios/missing/paper-runs",
+        json={"dataset_version": "v1", "data": {"missing": bars()}},
+    )
+    assert response.status_code == 400
+    registry.close()
