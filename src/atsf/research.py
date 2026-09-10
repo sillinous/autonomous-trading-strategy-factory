@@ -8,6 +8,7 @@ import pandas as pd
 
 from .allocation import AllocationPolicy
 from .data import dataset_identity
+from .dataset_bundle import bundle_identity
 from .experiment import ExperimentSpec
 from .fitness import FitnessPolicy, FitnessResult
 from .population import Candidate, seed_population
@@ -32,6 +33,7 @@ def _build_research_portfolio(
     result: GenerationResult,
     dataset_id: str,
     dataset_version: str,
+    source_data: pd.DataFrame,
     store: ExperimentRegistry,
 ) -> str | None:
     eligible = [
@@ -76,10 +78,13 @@ def _build_research_portfolio(
         portfolio_policy=selection_policy,
         allocation_policy=allocation_policy,
     )
+    data_bundle = {strategy_id: source_data for strategy_id in portfolio.allocation.weights}
+    bundle = bundle_identity(data_bundle, dataset_id)
 
     definition = {
         "dataset_id": dataset_id,
         "dataset_version": dataset_version,
+        "data_bundle_version": bundle.version,
         "generation": result.generation,
         "experiment_ids": {
             evaluation.candidate_id: evaluation.experiment.experiment_id
@@ -233,6 +238,7 @@ def run_research(
                 result,
                 identity.dataset_id,
                 identity.version,
+                data,
                 store,
             ) or portfolio_id
             for candidate in result.next_population:
