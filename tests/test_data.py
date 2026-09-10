@@ -34,6 +34,13 @@ def test_market_data_rejects_duplicate_timestamps():
         validate_market_data(data)
 
 
+def test_market_data_rejects_timezone_aware_timestamps():
+    data = make_data()
+    data.index = data.index.tz_localize("UTC")
+    with pytest.raises(ValueError, match="timezone-naive"):
+        validate_market_data(data)
+
+
 def test_market_data_rejects_invalid_ohlc():
     data = make_data()
     data.loc[data.index[1], "low"] = 99
