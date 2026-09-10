@@ -121,6 +121,24 @@ def run_paper_portfolio(
 
     if not snapshots:
         raise ValueError("paper portfolio data cannot be empty")
+
+    # Deterministically close residual positions at the final observed price so
+    # the returned result represents realized portfolio capital, not open mark-to-market exposure.
+    if not risk.state.halted:
+        timestamp = reference_index[-1]
+        for strategy_id, broker in brokers.items():
+            if broker.position > 0:
+                price = float(data[strategy_id].loc[timestamp, "close"])
+                fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
+        final_equity = reserve + sum(
+            broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity
+            for strategy_id, broker in brokers.items()
+        )
+        if snapshots[-1].timestamp == timestamp:
+            snapshots[-1] = PortfolioPaperSnapshot(timestamp, final_equity, reserve)
+        else:
+            snapshots.append(PortfolioPaperSnapshot(timestamp, final_equity, reserve))
+
     state = risk.state
     return PortfolioPaperResult(
         tuple(snapshots),
