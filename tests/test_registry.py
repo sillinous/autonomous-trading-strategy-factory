@@ -1,5 +1,6 @@
 import pytest
 
+from atsf.dataset_bundle import DatasetBundleIdentity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
@@ -14,10 +15,10 @@ from atsf.strategy import (
 )
 
 
-def make_strategy() -> StrategySpec:
+def make_strategy(version: int = 1) -> StrategySpec:
     return StrategySpec(
         name="registry-test",
-        version=1,
+        version=version,
         universe=["TEST"],
         timeframe="1d",
         indicators=[Indicator(name="sma", source="close", period=5)],
@@ -25,6 +26,13 @@ def make_strategy() -> StrategySpec:
         exit=Signal(all=[Condition(left="close", comparator=Comparator.LT, right="sma")]),
         position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
         risk=RiskLimits(max_position=0.5),
+    )
+
+
+def register_prices(registry: ExperimentRegistry) -> None:
+    registry.register_dataset(
+        DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        source="fixture",
     )
 
 
@@ -48,6 +56,7 @@ def test_registry_round_trips_strategy_and_lineage():
 
 def test_registry_persists_experiment_metadata():
     registry = ExperimentRegistry()
+    register_prices(registry)
     strategy = make_strategy()
     spec = ExperimentSpec(strategy, "prices", "v1", seed=7)
     result = ExperimentResult(spec.experiment_id, "paper", score=1.2)
@@ -64,8 +73,18 @@ def test_registry_persists_experiment_metadata():
     registry.close()
 
 
+def test_registry_rejects_unregistered_experiment_dataset():
+    registry = ExperimentRegistry()
+    strategy = make_strategy()
+    spec = ExperimentSpec(strategy, "missing", "v1", seed=1)
+    with pytest.raises(KeyError, match="unknown dataset"):
+        registry.save_experiment(spec, ExperimentResult(spec.experiment_id, "research", score=0.1))
+    registry.close()
+
+
 def test_registry_round_trips_evaluation_evidence():
     registry = ExperimentRegistry()
+    register_prices(registry)
     strategy = make_strategy()
     spec = ExperimentSpec(strategy, "prices", "v1", seed=3)
     result = ExperimentResult(spec.experiment_id, "research", score=0.8)
@@ -88,9 +107,10 @@ def test_registry_rejects_non_json_evidence():
 
 def test_registry_ranks_only_eligible_experiments():
     registry = ExperimentRegistry()
-    strategy = make_strategy()
+    register_prices(registry)
     for seed, status, score in ((1, "eligible", 0.5), (2, "eligible", 1.5), (3, "research", 99.0)):
-        spec = ExperimentSpec(strategy.model_copy(update={"version": seed}), "prices", "v1", seed)
+        strategy = make_strategy(seed)
+        spec = ExperimentSpec(strategy, "prices", "v1", seed)
         registry.save_experiment(spec, ExperimentResult(spec.experiment_id, status, score=score))
 
     ranked = registry.rank_experiments("prices")
