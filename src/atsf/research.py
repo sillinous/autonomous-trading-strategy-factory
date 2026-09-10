@@ -148,7 +148,8 @@ def run_research(
         raise ValueError("population sizes must be positive")
     if survivor_count > population_size:
         raise ValueError("survivor_count cannot exceed population_size")
-    identity = dataset_identity(data, dataset_id)
+    frame_identity = dataset_identity(data, dataset_id)
+    registered_identity = bundle_identity({"research": data}, dataset_id)
     population = seed_population(seeds)
     if not population:
         raise ValueError("seeds must contain at least one unique strategy")
@@ -158,11 +159,8 @@ def run_research(
     results: list[GenerationResult] = []
     portfolio_id: str | None = None
     try:
-        store.register_dataset(
-            bundle_identity({"research": data}, dataset_id),
-            source="research_input",
-        )
-        store.require_dataset(identity.dataset_id, identity.version)
+        store.register_dataset(registered_identity, source="research_input")
+        store.require_dataset(registered_identity.dataset_id, registered_identity.version)
         for candidate in population:
             store.save_strategy(candidate.strategy)
             store.save_lineage(candidate.lineage)
@@ -173,8 +171,8 @@ def run_research(
             result = evolve_generation(
                 population,
                 data,
-                identity.dataset_id,
-                identity.version,
+                registered_identity.dataset_id,
+                registered_identity.version,
                 target_size=population_size,
                 survivor_count=survivor_count,
                 seed=seed + generation,
@@ -185,8 +183,8 @@ def run_research(
                 candidate = candidates_by_id[evaluation.candidate_id]
                 spec = ExperimentSpec(
                     candidate.strategy,
-                    identity.dataset_id,
-                    identity.version,
+                    registered_identity.dataset_id,
+                    registered_identity.version,
                     seed + generation,
                 )
                 store.save_experiment(spec, evaluation.experiment)
@@ -241,8 +239,8 @@ def run_research(
                 )
             portfolio_id = _build_research_portfolio(
                 result,
-                identity.dataset_id,
-                identity.version,
+                registered_identity.dataset_id,
+                registered_identity.version,
                 data,
                 store,
             ) or portfolio_id
@@ -257,7 +255,7 @@ def run_research(
     return ResearchRunResult(
         generations=tuple(results),
         final_population=tuple(population),
-        dataset_id=identity.dataset_id,
-        dataset_version=identity.version,
+        dataset_id=frame_identity.dataset_id,
+        dataset_version=registered_identity.version,
         portfolio_id=portfolio_id,
     )
