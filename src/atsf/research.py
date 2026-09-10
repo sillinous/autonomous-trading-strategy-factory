@@ -136,7 +136,7 @@ def run_research(
     registry: ExperimentRegistry | None = None,
     fitness_policy: FitnessPolicy | None = None,
 ) -> ResearchRunResult:
-    """Run deterministic evolutionary research and persist a reproducible portfolio when possible."""
+    """Run deterministic evolutionary research and persist a portfolio when possible."""
     if generations <= 0:
         raise ValueError("generations must be positive")
     if population_size <= 0 or survivor_count <= 0:
@@ -247,6 +247,6 @@ def run_research(
         generations=tuple(results),
         final_population=tuple(population),
         dataset_id=identity.dataset_id,
-        dataset_version=identity.version,
+        dataset_version=identity.dataset_version,
         portfolio_id=portfolio_id,
     )
