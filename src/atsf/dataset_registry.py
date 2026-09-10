@@ -35,12 +35,19 @@ class DatasetRegistry:
                 start TEXT NOT NULL,
                 end TEXT NOT NULL,
                 source TEXT NOT NULL,
-                timeframe TEXT NOT NULL,
-                schema_version TEXT NOT NULL,
+                timeframe TEXT NOT NULL DEFAULT '1d',
+                schema_version TEXT NOT NULL DEFAULT 'ohlcv.v1',
                 PRIMARY KEY (dataset_id, version)
             )
             """
         )
+        columns = {row[1] for row in self._connection.execute("PRAGMA table_info(datasets)")}
+        if "timeframe" not in columns:
+            self._connection.execute("ALTER TABLE datasets ADD COLUMN timeframe TEXT NOT NULL DEFAULT '1d'")
+        if "schema_version" not in columns:
+            self._connection.execute(
+                "ALTER TABLE datasets ADD COLUMN schema_version TEXT NOT NULL DEFAULT 'ohlcv.v1'"
+            )
         self._connection.commit()
 
     def register(
