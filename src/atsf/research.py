@@ -158,6 +158,11 @@ def run_research(
     results: list[GenerationResult] = []
     portfolio_id: str | None = None
     try:
+        store.register_dataset(
+            bundle_identity({"research": data}, dataset_id),
+            source="research_input",
+        )
+        store.require_dataset(identity.dataset_id, identity.version)
         for candidate in population:
             store.save_strategy(candidate.strategy)
             store.save_lineage(candidate.lineage)
