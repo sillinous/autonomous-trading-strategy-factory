@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 
@@ -53,9 +54,20 @@ def _registry_from_environment() -> ExperimentRegistry:
 
 def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     """Create the HTTP service boundary; live execution is deliberately unavailable."""
-    app = FastAPI(title="Autonomous Trading Strategy Factory", version="0.1.0")
     owned_registry = registry is None
     store = registry or _registry_from_environment()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        if owned_registry:
+            store.close()
+
+    app = FastAPI(
+        title="Autonomous Trading Strategy Factory",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
 
     def get_store() -> ExperimentRegistry:
         return store
@@ -86,11 +98,11 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
 
     @app.post("/research/runs", status_code=201)
     def research_run(request: ResearchRunRequest, store: Store) -> dict:
-        frame = validate_market_data(
-            pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp")
-        )
-        identity = dataset_identity(frame, request.dataset_id)
         try:
+            frame = validate_market_data(
+                pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp")
+            )
+            identity = dataset_identity(frame, request.dataset_id)
             result = run_research(
                 request.seeds,
                 frame,
@@ -113,11 +125,13 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
 
     @app.post("/portfolios/{portfolio_id}/paper-runs", status_code=201)
     def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store) -> dict:
-        frames: dict[str, pd.DataFrame] = {}
         try:
+            frames: dict[str, pd.DataFrame] = {}
             for strategy_id, bars in request.data.items():
                 frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
                 frames[strategy_id] = validate_market_data(frame)
+            if store.get_portfolio(portfolio_id) is None:
+                raise HTTPException(status_code=404, detail="portfolio not found")
             result = execute_persisted_portfolio(
                 store,
                 portfolio_id,
@@ -128,6 +142,8 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 slippage_bps=request.slippage_bps,
                 max_drawdown=request.max_drawdown,
             )
+        except HTTPException:
+            raise
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (TypeError, ValueError) as exc:
@@ -143,11 +159,6 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "fill_count": len(result.paper.fills),
             "audit_event_count": len(result.audit_events),
         }
-
-    @app.on_event("shutdown")
-    def shutdown() -> None:
-        if owned_registry:
-            store.close()
 
     return app
 
