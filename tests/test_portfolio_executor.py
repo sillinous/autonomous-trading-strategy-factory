@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from atsf.dataset_bundle import bundle_identity
+from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.portfolio_audit import PortfolioAuditEvent
 from atsf.portfolio_executor import execute_persisted_portfolio
@@ -40,8 +40,11 @@ def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, st
     strategies = [make_strategy("one", 3), make_strategy("two", 4)]
     ids = [registry.save_strategy(strategy) for strategy in strategies]
     data = {ids[0]: make_data(), ids[1]: make_data()}
-    dataset_version = bundle_identity(data, "prices").version
     data_bundle_version = bundle_identity(data, "prices").version
+    registry.register_dataset(
+        DatasetBundleIdentity("prices", "v1", ("TEST",), 12, "2026-01-01T00:00:00", "2026-01-12T00:00:00"),
+        source="fixture",
+    )
     experiment_ids = {}
     for strategy_id, strategy in zip(ids, strategies):
         spec = ExperimentSpec(strategy, "prices", "v1", seed=1)
@@ -59,7 +62,7 @@ def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, st
         },
         {ids[0]: 0.6, ids[1]: 0.3},
     )
-    return ids[0], ids[1], "v1", dataset_version
+    return ids[0], ids[1], "v1", data_bundle_version
 
 
 def test_executor_uses_persisted_members_and_saves_run():
