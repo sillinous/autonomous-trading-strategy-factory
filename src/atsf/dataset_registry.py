@@ -61,7 +61,7 @@ class DatasetRegistry:
         if identity.rows <= 0:
             raise ValueError("dataset must contain rows")
         normalized_source = source.strip()
-        if identity.source != normalized_source:
+        if identity.source not in ("unspecified", normalized_source):
             raise ValueError("dataset source does not match its identity")
         record = DatasetRecord(
             dataset_id=identity.dataset_id,
