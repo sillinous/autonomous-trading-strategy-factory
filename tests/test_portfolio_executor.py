@@ -36,29 +36,35 @@ def make_data(offset: float = 0.0) -> pd.DataFrame:
     )
 
 
-def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, str]:
+def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, str, str]:
     strategies = [make_strategy("one", 3), make_strategy("two", 4)]
     ids = [registry.save_strategy(strategy) for strategy in strategies]
     data = {ids[0]: make_data(), ids[1]: make_data()}
     dataset_version = bundle_identity(data, "prices").version
+    data_bundle_version = bundle_identity(data, "prices").version
     experiment_ids = {}
     for strategy_id, strategy in zip(ids, strategies):
-        spec = ExperimentSpec(strategy, "prices", dataset_version, seed=1)
+        spec = ExperimentSpec(strategy, "prices", "v1", seed=1)
         result = ExperimentResult(spec.experiment_id, "paper", score=1.0)
         registry.save_experiment(spec, result)
         registry.save_evaluation_evidence(spec.experiment_id, {"promotion": {"stage": "paper", "eligible": True, "reasons": []}})
         experiment_ids[strategy_id] = spec.experiment_id
     registry.save_portfolio(
         "portfolio-1",
-        {"dataset_id": "prices", "dataset_version": dataset_version, "experiment_ids": experiment_ids},
+        {
+            "dataset_id": "prices",
+            "dataset_version": "v1",
+            "data_bundle_version": data_bundle_version,
+            "experiment_ids": experiment_ids,
+        },
         {ids[0]: 0.6, ids[1]: 0.3},
     )
-    return ids[0], ids[1], dataset_version
+    return ids[0], ids[1], "v1", dataset_version
 
 
 def test_executor_uses_persisted_members_and_saves_run():
     registry = ExperimentRegistry()
-    first, second, dataset_version = seed_persisted_portfolio(registry)
+    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
     result = execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), second: make_data()}, dataset_version=dataset_version)
     assert result.identity.portfolio_id == "portfolio-1"
     assert result.identity.dataset_version == dataset_version
@@ -75,12 +81,12 @@ def test_executor_uses_persisted_members_and_saves_run():
 
 def test_executor_is_idempotency_guarded_and_data_changes_are_rejected():
     registry = ExperimentRegistry()
-    first, second, dataset_version = seed_persisted_portfolio(registry)
+    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
     data = {first: make_data(), second: make_data()}
     result = execute_persisted_portfolio(registry, "portfolio-1", data, dataset_version=dataset_version)
     with pytest.raises(ValueError, match="already exists"):
         execute_persisted_portfolio(registry, "portfolio-1", data, dataset_version=dataset_version)
-    with pytest.raises(ValueError, match="content does not match"):
+    with pytest.raises(ValueError, match="data bundle version"):
         execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), second: make_data(1.0)}, dataset_version=dataset_version)
     assert result.identity.execution_fingerprint
     registry.close()
@@ -88,7 +94,7 @@ def test_executor_is_idempotency_guarded_and_data_changes_are_rejected():
 
 def test_executor_rejects_dataset_version_mismatch():
     registry = ExperimentRegistry()
-    first, second, _dataset_version = seed_persisted_portfolio(registry)
+    first, second, _dataset_version, _bundle_version = seed_persisted_portfolio(registry)
     with pytest.raises(ValueError, match="dataset_version"):
         execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), second: make_data()}, dataset_version="wrong")
     registry.close()
@@ -96,7 +102,7 @@ def test_executor_rejects_dataset_version_mismatch():
 
 def test_registry_audit_ledger_rejects_gaps_and_non_members():
     registry = ExperimentRegistry()
-    first, _second, _dataset_version = seed_persisted_portfolio(registry)
+    first, _second, _dataset_version, _bundle_version = seed_persisted_portfolio(registry)
     registry.save_portfolio_run("manual-run", "portfolio-1", 100_000.0, False, None, [])
     event = PortfolioAuditEvent(1, first, "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.01)
     with pytest.raises(ValueError, match="contiguous"):
