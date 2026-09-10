@@ -2,7 +2,9 @@ import pandas as pd
 import pytest
 
 from atsf.ingestion import ingest
-from atsf.provider import FrameMarketDataProvider
+from atsf.ingestion_registry import ingest_and_register
+from atsf.provider import DataRequest, FrameMarketDataProvider
+from atsf.registry import ExperimentRegistry
 
 
 def frame(offset: float = 0.0) -> pd.DataFrame:
@@ -21,7 +23,11 @@ def frame(offset: float = 0.0) -> pd.DataFrame:
 
 
 def test_ingest_returns_validated_fingerprinted_snapshot():
-    snapshot = ingest(FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)}), "market", ["BBB", "AAA"])
+    snapshot = ingest(
+        FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)}),
+        "market",
+        ["BBB", "AAA"],
+    )
     assert snapshot.dataset_id == "market"
     assert snapshot.bundle.symbols == ("AAA", "BBB")
     assert snapshot.bundle.rows == 10
@@ -40,3 +46,24 @@ def test_ingest_rejects_duplicate_symbols():
     provider = FrameMarketDataProvider({"AAA": frame()})
     with pytest.raises(ValueError, match="unique"):
         ingest(provider, "market", ["AAA", "AAA"])
+
+
+def test_ingest_and_register_fingerprints_exact_requested_ranges():
+    provider = FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)})
+    registry = ExperimentRegistry()
+    requests = [
+        DataRequest("AAA", pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-05")),
+        DataRequest("BBB", pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-04")),
+    ]
+    snapshot, record = ingest_and_register(
+        provider,
+        registry._connection,
+        "requested-market",
+        requests,
+        source="fixture",
+    )
+    assert snapshot.bundle.version == record.version
+    assert snapshot.bundle.rows == 6
+    assert registry.require_dataset("requested-market", record.version) == record
+    assert all(len(frame) == 3 for frame in snapshot.data.values())
+    registry.close()
