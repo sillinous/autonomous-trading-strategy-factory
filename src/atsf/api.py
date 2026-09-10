@@ -8,9 +8,11 @@ import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .data import validate_market_data
+from .data import dataset_identity, validate_market_data
 from .portfolio_executor import execute_persisted_portfolio
 from .registry import ExperimentRegistry
+from .research import run_research
+from .strategy import StrategySpec
 
 
 class MarketBar(BaseModel):
@@ -29,6 +31,16 @@ class PaperRunRequest(BaseModel):
     commission_bps: float = Field(default=1.0, ge=0)
     slippage_bps: float = Field(default=2.0, ge=0)
     max_drawdown: float | None = Field(default=None, gt=0, lt=1)
+
+
+class ResearchRunRequest(BaseModel):
+    dataset_id: str = Field(min_length=1)
+    data: list[MarketBar] = Field(min_length=1)
+    seeds: list[StrategySpec] = Field(min_length=1)
+    generations: int = Field(default=1, ge=1)
+    population_size: int = Field(default=10, ge=1)
+    survivor_count: int = Field(default=3, ge=1)
+    seed: int = 0
 
 
 class ServiceConfig(BaseModel):
@@ -71,6 +83,33 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
+
+    @app.post("/research/runs", status_code=201)
+    def research_run(request: ResearchRunRequest, store: Store) -> dict:
+        frame = validate_market_data(
+            pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp")
+        )
+        identity = dataset_identity(frame, request.dataset_id)
+        try:
+            result = run_research(
+                request.seeds,
+                frame,
+                generations=request.generations,
+                population_size=request.population_size,
+                survivor_count=request.survivor_count,
+                seed=request.seed,
+                dataset_id=request.dataset_id,
+                registry=store,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "dataset_id": identity.dataset_id,
+            "dataset_version": identity.version,
+            "generations": len(result.generations),
+            "final_population_size": len(result.final_population),
+            "portfolio_id": result.portfolio_id,
+        }
 
     @app.post("/portfolios/{portfolio_id}/paper-runs", status_code=201)
     def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store) -> dict:
