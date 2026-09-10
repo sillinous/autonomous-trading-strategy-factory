@@ -16,6 +16,8 @@ class DatasetRecord:
     start: str
     end: str
     source: str
+    timeframe: str
+    schema_version: str
 
 
 class DatasetRegistry:
@@ -33,6 +35,8 @@ class DatasetRegistry:
                 start TEXT NOT NULL,
                 end TEXT NOT NULL,
                 source TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
                 PRIMARY KEY (dataset_id, version)
             )
             """
@@ -49,6 +53,9 @@ class DatasetRegistry:
             raise ValueError("source is required")
         if identity.rows <= 0:
             raise ValueError("dataset must contain rows")
+        normalized_source = source.strip()
+        if identity.source != normalized_source:
+            raise ValueError("dataset source does not match its identity")
         record = DatasetRecord(
             dataset_id=identity.dataset_id,
             version=identity.version,
@@ -56,7 +63,9 @@ class DatasetRegistry:
             rows=identity.rows,
             start=identity.start,
             end=identity.end,
-            source=source.strip(),
+            source=normalized_source,
+            timeframe=identity.timeframe,
+            schema_version=identity.schema_version,
         )
         existing = self.get(identity.dataset_id, identity.version)
         if existing is not None:
@@ -66,8 +75,8 @@ class DatasetRegistry:
         self._connection.execute(
             """
             INSERT INTO datasets
-                (dataset_id, version, symbols_json, rows, start, end, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (dataset_id, version, symbols_json, rows, start, end, source, timeframe, schema_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.dataset_id,
@@ -77,6 +86,8 @@ class DatasetRegistry:
                 record.start,
                 record.end,
                 record.source,
+                record.timeframe,
+                record.schema_version,
             ),
         )
         self._connection.commit()
@@ -85,7 +96,7 @@ class DatasetRegistry:
     def get(self, dataset_id: str, version: str) -> DatasetRecord | None:
         row = self._connection.execute(
             """
-            SELECT dataset_id, version, symbols_json, rows, start, end, source
+            SELECT dataset_id, version, symbols_json, rows, start, end, source, timeframe, schema_version
             FROM datasets
             WHERE dataset_id = ? AND version = ?
             """,
@@ -101,6 +112,8 @@ class DatasetRegistry:
             start=row[4],
             end=row[5],
             source=row[6],
+            timeframe=row[7],
+            schema_version=row[8],
         )
 
     def require(self, dataset_id: str, version: str) -> DatasetRecord:
