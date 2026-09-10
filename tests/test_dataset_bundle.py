@@ -1,0 +1,37 @@
+import pandas as pd
+import pytest
+
+from atsf.dataset_bundle import bundle_identity
+
+
+def frame(offset: float = 0.0) -> pd.DataFrame:
+    index = pd.date_range("2025-01-01", periods=3, freq="D")
+    return pd.DataFrame(
+        {
+            "open": [100 + offset, 101 + offset, 102 + offset],
+            "high": [101 + offset, 102 + offset, 103 + offset],
+            "low": [99 + offset, 100 + offset, 101 + offset],
+            "close": [100.5 + offset, 101.5 + offset, 102.5 + offset],
+            "volume": [1000, 1100, 1200],
+        },
+        index=index,
+    )
+
+
+def test_bundle_identity_is_deterministic_and_order_independent():
+    first = bundle_identity({"AAA": frame(), "BBB": frame(10)}, "market")
+    second = bundle_identity({"BBB": frame(10), "AAA": frame()}, "market")
+    assert first == second
+    assert first.symbols == ("AAA", "BBB")
+    assert first.rows == 6
+
+
+def test_bundle_identity_changes_when_data_changes():
+    first = bundle_identity({"AAA": frame()}, "market")
+    second = bundle_identity({"AAA": frame(1)}, "market")
+    assert first.version != second.version
+
+
+def test_bundle_identity_rejects_empty_bundle():
+    with pytest.raises(ValueError, match="cannot be empty"):
+        bundle_identity({}, "market")
