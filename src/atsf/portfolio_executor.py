@@ -126,10 +126,18 @@ def execute_persisted_portfolio(
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
 
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
-    store.save_portfolio_run(identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason,
-                             [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions],
-                             dataset_id=persisted_dataset_id, dataset_version=dataset_version,
-                             data_bundle_version=bundle.version, execution_fingerprint=identity.execution_fingerprint,
-                             execution_config=execution_config)
-    store.save_portfolio_audit_events(identity.run_id, list(audit_events))
+    store.save_portfolio_execution(
+        identity.run_id,
+        portfolio_id,
+        paper.final_equity,
+        paper.halted,
+        paper.halt_reason,
+        [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions],
+        dataset_id=persisted_dataset_id,
+        dataset_version=dataset_version,
+        data_bundle_version=bundle.version,
+        execution_fingerprint=identity.execution_fingerprint,
+        execution_config=execution_config,
+        audit_events=list(audit_events),
+    )
     return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
