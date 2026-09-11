@@ -31,15 +31,19 @@ def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initia
         notional = event.quantity * event.price
         if notional <= 0 or not isfinite(notional): raise ValueError("audit fill notional is invalid")
         expected_fee = notional * commission_bps / 10_000.0
-        if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
-            raise ValueError("audit fill fee does not match execution configuration")
-        if event.action == "buy":
+        if event.action == "sell":
+            if event.quantity > positions[event.strategy_id] + tolerance:
+                raise ValueError("audit ledger contains a sell exceeding the strategy position")
+            if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
+                raise ValueError("audit fill fee does not match execution configuration")
+            cash[event.strategy_id] += notional - event.fee
+            positions[event.strategy_id] = max(0.0, positions[event.strategy_id] - event.quantity)
+        else:
+            if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
+                raise ValueError("audit fill fee does not match execution configuration")
             required = notional + event.fee
             if required > cash[event.strategy_id] + tolerance: raise ValueError("audit ledger contains a buy exceeding available strategy cash")
             cash[event.strategy_id] -= required; positions[event.strategy_id] += event.quantity
-        else:
-            if event.quantity > positions[event.strategy_id] + tolerance: raise ValueError("audit ledger contains a sell exceeding the strategy position")
-            cash[event.strategy_id] += notional - event.fee; positions[event.strategy_id] = max(0.0, positions[event.strategy_id] - event.quantity)
     if any(abs(position) > tolerance for position in positions.values()):
         raise ValueError("audit ledger does not end flat")
     ending_cash = sum(cash.values())
