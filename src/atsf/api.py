@@ -70,24 +70,24 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]: return {"status": "ok"}
     @app.get("/capabilities")
-    def capabilities(_auth: Protected) -> ServiceConfig: return ServiceConfig(live_execution_enabled=False)
+    def capabilities(_auth: Protected = None) -> ServiceConfig: return ServiceConfig(live_execution_enabled=False)
     @app.get("/portfolios/{portfolio_id}")
-    def portfolio(portfolio_id: str, store: Store, _auth: Protected) -> dict:
+    def portfolio(portfolio_id: str, store: Store, _auth: Protected = None) -> dict:
         result = store.get_portfolio(portfolio_id)
         if result is None: raise HTTPException(status_code=404, detail="portfolio not found")
         return result
     @app.get("/runs/{run_id}")
-    def run(run_id: str, store: Store, _auth: Protected) -> dict:
+    def run(run_id: str, store: Store, _auth: Protected = None) -> dict:
         result = store.get_portfolio_run(run_id)
         if result is None: raise HTTPException(status_code=404, detail="paper run not found")
         return result
     @app.get("/strategies/{strategy_id}/feedback")
-    def strategy_feedback(strategy_id: str, store: Store, _auth: Protected) -> dict:
+    def strategy_feedback(strategy_id: str, store: Store, _auth: Protected = None) -> dict:
         if not strategy_id: raise HTTPException(status_code=400, detail="strategy_id cannot be empty")
         events = FeedbackEventStore(store).list_for_strategy(strategy_id)
         return {"strategy_id": strategy_id, "event_count": len(events), "events": events}
     @app.get("/runs/{run_id}/provenance-graph")
-    def provenance_graph(run_id: str, store: Store, _auth: Protected) -> dict:
+    def provenance_graph(run_id: str, store: Store, _auth: Protected = None) -> dict:
         run = store.get_portfolio_run(run_id)
         if run is None: raise HTTPException(status_code=404, detail="paper run not found")
         try: graph = build_research_provenance_graph(store, run)
@@ -96,22 +96,22 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 "nodes": [{"node_id": n.node_id, "kind": n.kind, "key": n.key, "attributes": n.attributes} for n in graph.nodes],
                 "edges": [{"source": e.source, "target": e.target, "relation": e.relation} for e in graph.edges]}
     @app.get("/runs/{run_id}/certificate")
-    def get_certificate(run_id: str, store: Store, _auth: Protected) -> dict:
+    def get_certificate(run_id: str, store: Store, _auth: Protected = None) -> dict:
         certificate = store.get_reproducibility_certificate(run_id)
         if certificate is None: raise HTTPException(status_code=404, detail="reproducibility certificate not found")
         return certificate
     @app.get("/runs/{run_id}/certificate/verify")
-    def verify_certificate(run_id: str, store: Store, _auth: Protected) -> dict:
+    def verify_certificate(run_id: str, store: Store, _auth: Protected = None) -> dict:
         result = verify_persisted_certificate(store, run_id)
         if not result.valid and result.reason == "reproducibility certificate not found": raise HTTPException(status_code=404, detail=result.reason)
         return {"run_id": result.run_id, "certificate_id": result.certificate_id, "valid": result.valid, "reason": result.reason}
     @app.get("/runs/{run_id}/verify")
-    def verify_run(run_id: str, store: Store, _auth: Protected) -> dict:
+    def verify_run(run_id: str, store: Store, _auth: Protected = None) -> dict:
         try: verification = verify_persisted_portfolio_run(store, run_id)
         except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"run_id": verification.run_id, "valid": verification.valid, "reason": verification.reason, "event_count": verification.manifest.event_count, "ledger_fingerprint": verification.manifest.ledger_fingerprint}
     @app.post("/runs/{run_id}/verify-replay")
-    def verify_replay(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
+    def verify_replay(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected = None) -> dict:
         try:
             frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             run = store.get_portfolio_run(run_id)
@@ -122,7 +122,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"run_id": verification.run_id, "valid": verification.valid, "reason": verification.reason, "event_count": verification.manifest.event_count, "ledger_fingerprint": verification.manifest.ledger_fingerprint}
     @app.post("/runs/{run_id}/certificate")
-    def certificate(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
+    def certificate(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected = None) -> dict:
         try:
             frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             run = store.get_portfolio_run(run_id)
@@ -136,7 +136,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
         return certificate_result.__dict__
     @app.post("/research/runs", status_code=201)
-    def research_run(request: ResearchRunRequest, store: Store, _auth: Protected) -> dict:
+    def research_run(request: ResearchRunRequest, store: Store, _auth: Protected = None) -> dict:
         try:
             frame = validate_market_data(pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp"))
             identity = dataset_identity(frame, request.dataset_id)
@@ -144,7 +144,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"dataset_id": identity.dataset_id, "dataset_version": identity.version, "generations": len(result.generations), "final_population_size": len(result.final_population), "portfolio_id": result.portfolio_id}
     @app.post("/portfolios/{portfolio_id}/paper-runs", status_code=201)
-    def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store, _auth: Protected) -> dict:
+    def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store, _auth: Protected = None) -> dict:
         try:
             frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             if store.get_portfolio(portfolio_id) is None: raise HTTPException(status_code=404, detail="portfolio not found")
