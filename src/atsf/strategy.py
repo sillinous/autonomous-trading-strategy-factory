@@ -6,6 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+IndicatorKind = Literal["sma", "ema", "rsi"]
+
+
 class Side(str, Enum):
     LONG = "long"
     SHORT = "short"
@@ -25,10 +28,20 @@ class Indicator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    kind: Literal["sma", "ema", "rsi"]
+    kind: IndicatorKind | None = None
     source: str = "close"
     period: int | None = Field(default=None, gt=0)
     parameters: dict[str, float | int | str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def normalize_kind(self) -> Indicator:
+        # Preserve the original compact DSL form: Indicator(name="sma", period=20).
+        # New generated strategies use an explicit kind plus a semantic name.
+        if self.kind is None:
+            if self.name not in {"sma", "ema", "rsi"}:
+                raise ValueError("indicator kind is required when name is not a built-in indicator name")
+            return self.model_copy(update={"kind": self.name})
+        return self
 
 
 class Condition(BaseModel):
