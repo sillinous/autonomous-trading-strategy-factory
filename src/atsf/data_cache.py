@@ -68,7 +68,11 @@ class MarketDataCache:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if manifest.get("cache_key") != key.value:
                 return None
-            restored = validate_market_data(pd.read_csv(path, index_col=0, parse_dates=True))
+            restored = pd.read_csv(path, index_col=0, parse_dates=True)
+            stored_dtypes = manifest.get("dtypes")
+            if stored_dtypes:
+                restored = restored.astype(dict(zip(restored.columns, stored_dtypes, strict=True)))
+            restored = validate_market_data(restored)
             if manifest.get("index_freq"):
                 restored.index.freq = pd.tseries.frequencies.to_offset(manifest["index_freq"])
             if frame_fingerprint(restored) != manifest.get("frame_fingerprint"):
@@ -86,6 +90,7 @@ class MarketDataCache:
         fingerprint = frame_fingerprint(normalized)
         normalized.to_csv(temp)
         manifest = {"cache_key": key.value, "frame_fingerprint": fingerprint, "rows": len(normalized),
+                    "dtypes": [str(dtype) for dtype in normalized.dtypes],
                     "index_freq": str(normalized.index.freq) if normalized.index.freq is not None else None}
         manifest_temp.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         temp.replace(path)
