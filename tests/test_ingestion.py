@@ -27,10 +27,15 @@ def test_ingest_returns_validated_fingerprinted_snapshot():
         FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)}),
         "market",
         ["BBB", "AAA"],
+        source="fixture",
+        timeframe="1d",
     )
     assert snapshot.dataset_id == "market"
     assert snapshot.bundle.symbols == ("AAA", "BBB")
     assert snapshot.bundle.rows == 10
+    assert snapshot.bundle.source == "fixture"
+    assert snapshot.bundle.timeframe == "1d"
+    assert snapshot.bundle.schema_version == "ohlcv.v1"
     assert set(snapshot.data) == {"AAA", "BBB"}
 
 
@@ -61,9 +66,13 @@ def test_ingest_and_register_fingerprints_exact_requested_ranges():
         "requested-market",
         requests,
         source="fixture",
+        timeframe="1d",
     )
     assert snapshot.bundle.version == record.version
     assert snapshot.bundle.rows == 6
+    assert record.source == "fixture"
+    assert record.timeframe == "1d"
+    assert record.schema_version == "ohlcv.v1"
     assert registry.require_dataset("requested-market", record.version) == record
     assert all(len(frame) == 3 for frame in snapshot.data.values())
     registry.close()
