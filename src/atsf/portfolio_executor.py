@@ -74,11 +74,7 @@ def execute_persisted_portfolio(
         raise ValueError("dataset_version does not match the persisted portfolio")
 
     dataset = store.require_dataset(persisted_dataset_id, dataset_version)
-    for key, expected in (
-        ("data_source", dataset.source),
-        ("data_timeframe", dataset.timeframe),
-        ("data_schema_version", dataset.schema_version),
-    ):
+    for key, expected in (("data_source", dataset.source), ("data_timeframe", dataset.timeframe), ("data_schema_version", dataset.schema_version)):
         if definition.get(key) != expected:
             raise ValueError(f"persisted portfolio {key} does not match the registered dataset contract")
 
@@ -90,13 +86,7 @@ def execute_persisted_portfolio(
     if set(data) != set(weights):
         raise ValueError("market data must contain exactly the persisted portfolio members")
 
-    bundle = bundle_identity(
-        data,
-        persisted_dataset_id,
-        source=dataset.source,
-        timeframe=dataset.timeframe,
-        schema_version=dataset.schema_version,
-    )
+    bundle = bundle_identity(data, persisted_dataset_id, source=dataset.source, timeframe=dataset.timeframe, schema_version=dataset.schema_version)
     if bundle.version != persisted_bundle_version:
         raise ValueError("market data content does not match the persisted data bundle version")
 
@@ -119,52 +109,27 @@ def execute_persisted_portfolio(
         if evidence is None or not isinstance(evidence.get("promotion"), dict):
             raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
         promotion = evidence["promotion"]
-        decisions[strategy_id] = PromotionDecision(
-            stage=str(promotion["stage"]), eligible=bool(promotion["eligible"]), reasons=tuple(promotion.get("reasons", ())),
-        )
+        decisions[strategy_id] = PromotionDecision(stage=str(promotion["stage"]), eligible=bool(promotion["eligible"]), reasons=tuple(promotion.get("reasons", ())))
         strategies[strategy_id] = strategy
 
-    execution_config = {
-        "initial_cash": float(initial_cash), "commission_bps": float(commission_bps),
-        "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown,
-    }
-    identity = build_portfolio_run_identity(
-        portfolio_id, dataset_version, weights,
-        execution_config=execution_config, data_fingerprint=bundle.version,
-    )
+    execution_config = {"initial_cash": float(initial_cash), "commission_bps": float(commission_bps), "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown}
+    identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights, execution_config=execution_config, data_fingerprint=bundle.version)
     if store.get_portfolio_run(identity.run_id) is not None:
         raise ValueError("portfolio run already exists; execution is immutable")
 
-    paper = run_paper_portfolio(
-        data, strategies, weights, decisions=decisions,
-        initial_cash=initial_cash, commission_bps=commission_bps,
-        slippage_bps=slippage_bps, max_drawdown=max_drawdown,
-    )
-
-    sleeve_returns = {
-        strategy_id: _sleeve_returns(
-            data[strategy_id], strategies[strategy_id],
-            initial_cash=initial_cash * weights[strategy_id],
-            commission_bps=commission_bps, slippage_bps=slippage_bps,
-        )
-        for strategy_id in weights if weights[strategy_id] > 0
-    }
+    paper = run_paper_portfolio(data, strategies, weights, decisions=decisions, initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps, max_drawdown=max_drawdown)
+    sleeve_returns = {strategy_id: _sleeve_returns(data[strategy_id], strategies[strategy_id], initial_cash=initial_cash * weights[strategy_id], commission_bps=commission_bps, slippage_bps=slippage_bps) for strategy_id in weights if weights[strategy_id] > 0}
     if not sleeve_returns:
         raise ValueError("persisted portfolio has no positive-weight strategies")
     returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index()
     returns.columns = list(sleeve_returns)
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
 
-    audit_events = tuple(
-        PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side,
-                            timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity),
-                            price=float(fill.price), fee=float(fill.fee))
-        for sequence, (strategy_id, fill) in enumerate(paper.fills)
-    )
-    store.save_portfolio_run(
-        identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason,
-        [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution,
-          "risk_contribution": item.risk_contribution} for item in attribution.contributions],
-    )
+    audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
+    store.save_portfolio_run(identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason,
+                             [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions],
+                             dataset_id=persisted_dataset_id, dataset_version=dataset_version,
+                             data_bundle_version=bundle.version, execution_fingerprint=identity.execution_fingerprint,
+                             execution_config=execution_config)
     store.save_portfolio_audit_events(identity.run_id, list(audit_events))
     return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
