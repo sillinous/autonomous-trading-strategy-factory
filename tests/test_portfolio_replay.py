@@ -6,15 +6,20 @@ from atsf.registry import ExperimentRegistry
 from tests.test_portfolio_executor import make_data, seed_persisted_portfolio
 
 
-def test_persisted_execution_replay_verifies_ledger_commitment() -> None:
-    registry = ExperimentRegistry()
-    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
+def execute(registry: ExperimentRegistry):
+    first, second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
     result = execute_persisted_portfolio(
         registry,
         "portfolio-1",
         {first: make_data(), second: make_data()},
         dataset_version=dataset_version,
     )
+    return result, dataset_version, bundle_version
+
+
+def test_persisted_execution_replay_verifies_identity_and_ledger_commitments() -> None:
+    registry = ExperimentRegistry()
+    result, _dataset_version, _bundle_version = execute(registry)
 
     verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
 
@@ -26,14 +31,7 @@ def test_persisted_execution_replay_verifies_ledger_commitment() -> None:
 
 def test_persisted_execution_replay_fails_closed_when_ledger_is_tampered() -> None:
     registry = ExperimentRegistry()
-    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
-    result = execute_persisted_portfolio(
-        registry,
-        "portfolio-1",
-        {first: make_data(), second: make_data()},
-        dataset_version=dataset_version,
-    )
-
+    result, _dataset_version, _bundle_version = execute(registry)
     registry._connection.execute(
         "UPDATE portfolio_audit_events SET price = price + 1 WHERE run_id = ? AND sequence = 0",
         (result.identity.run_id,),
@@ -44,6 +42,38 @@ def test_persisted_execution_replay_fails_closed_when_ledger_is_tampered() -> No
 
     assert verification.valid is False
     assert verification.reason == "persisted execution ledger fingerprint mismatch"
+    registry.close()
+
+
+def test_replay_fails_closed_when_execution_config_is_tampered() -> None:
+    registry = ExperimentRegistry()
+    result, _dataset_version, _bundle_version = execute(registry)
+    registry._connection.execute(
+        "UPDATE portfolio_run_provenance SET execution_config_json = REPLACE(execution_config_json, '1.0', '2.0') WHERE run_id = ?",
+        (result.identity.run_id,),
+    )
+    registry._connection.commit()
+
+    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
+
+    assert verification.valid is False
+    assert "execution fingerprint" in verification.reason or "run ID" in verification.reason
+    registry.close()
+
+
+def test_replay_fails_closed_when_bundle_commitment_is_tampered() -> None:
+    registry = ExperimentRegistry()
+    result, _dataset_version, _bundle_version = execute(registry)
+    registry._connection.execute(
+        "UPDATE portfolio_run_provenance SET data_bundle_version = 'tampered' WHERE run_id = ?",
+        (result.identity.run_id,),
+    )
+    registry._connection.commit()
+
+    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
+
+    assert verification.valid is False
+    assert "data_bundle_version" in verification.reason or "run ID" in verification.reason
     registry.close()
 
 
