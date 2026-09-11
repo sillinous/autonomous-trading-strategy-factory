@@ -24,18 +24,20 @@ def validate_market_data(data: pd.DataFrame) -> pd.DataFrame:
     missing = [column for column in REQUIRED_COLUMNS if column not in data.columns]
     if missing:
         raise ValueError(f"missing required columns: {', '.join(missing)}")
-    if not isinstance(data.index, pd.DatetimeIndex):
-        raise TypeError("market data index must be a DatetimeIndex")
     if data.empty:
         raise ValueError("market data cannot be empty")
-    if not data.index.is_monotonic_increasing:
+    normalized_index = data.index if isinstance(data.index, pd.DatetimeIndex) else pd.to_datetime(data.index, errors="raise")
+    if not isinstance(normalized_index, pd.DatetimeIndex):
+        raise TypeError("market data index must be a DatetimeIndex")
+    if not normalized_index.is_monotonic_increasing:
         raise ValueError("market data index must be monotonically increasing")
-    if data.index.has_duplicates:
+    if normalized_index.has_duplicates:
         raise ValueError("market data index must not contain duplicates")
-    if data.index.tz is not None:
+    if normalized_index.tz is not None:
         raise ValueError("market data index must be timezone-naive")
 
     normalized = data.loc[:, list(REQUIRED_COLUMNS)].copy()
+    normalized.index = normalized_index
     for column in REQUIRED_COLUMNS:
         normalized[column] = pd.to_numeric(normalized[column], errors="raise")
         if not normalized[column].map(math.isfinite).all():
@@ -58,13 +60,7 @@ def dataset_identity(data: pd.DataFrame, dataset_id: str) -> DatasetIdentity:
     normalized = validate_market_data(data)
     payload = normalized.to_csv(index=True, date_format="%Y-%m-%dT%H:%M:%S.%f").encode("utf-8")
     version = hashlib.sha256(payload).hexdigest()[:16]
-    return DatasetIdentity(
-        dataset_id=dataset_id,
-        version=version,
-        rows=len(normalized),
-        start=normalized.index[0].isoformat(),
-        end=normalized.index[-1].isoformat(),
-    )
+    return DatasetIdentity(dataset_id=dataset_id, version=version, rows=len(normalized), start=normalized.index[0].isoformat(), end=normalized.index[-1].isoformat())
 
 
 def load_csv(source: str | bytes | io.BytesIO) -> pd.DataFrame:
