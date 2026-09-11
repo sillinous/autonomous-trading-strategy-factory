@@ -105,7 +105,7 @@ def test_research_run_endpoint_persists_research_artifacts(monkeypatch):
     registry.close()
 
 
-def test_paper_run_endpoint_executes_persisted_portfolio(monkeypatch):
+def test_paper_run_endpoint_executes_and_exposes_integrity_verification(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     strategy_id = seed(registry)
@@ -120,7 +120,12 @@ def test_paper_run_endpoint_executes_persisted_portfolio(monkeypatch):
     assert payload["final_equity"] > 0
     assert payload["execution_fingerprint"]
     assert payload["audit_event_count"] == payload["fill_count"]
-    assert client.get(f"/runs/{payload['run_id']}").status_code == 200
+
+    verification = client.get(f"/runs/{payload['run_id']}/verify")
+    assert verification.status_code == 200
+    assert verification.json()["valid"] is True
+    assert verification.json()["event_count"] == payload["audit_event_count"]
+    assert verification.json()["ledger_fingerprint"]
     registry.close()
 
 
