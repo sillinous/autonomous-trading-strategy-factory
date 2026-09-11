@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -46,11 +47,16 @@ class MarketDataCache:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def path_for(self, key: CacheKey) -> Path:
+    @staticmethod
+    def _resolve_key(key: CacheKey | Callable[[], CacheKey]) -> CacheKey:
+        return key() if callable(key) else key
+
+    def path_for(self, key: CacheKey | Callable[[], CacheKey]) -> Path:
+        key = self._resolve_key(key)
         safe_symbol = "".join(c if c.isalnum() or c in "-_" else "_" for c in key.symbol)
         return self.root / f"{safe_symbol}-{key.value}.csv"
 
-    def manifest_path_for(self, key: CacheKey) -> Path:
+    def manifest_path_for(self, key: CacheKey | Callable[[], CacheKey]) -> Path:
         return self.path_for(key).with_suffix(".json")
 
     def get(self, key: CacheKey) -> pd.DataFrame | None:
