@@ -25,6 +25,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 8. Immutable paper-trading execution and audit ledger
 9. FastAPI service boundary for research artifacts and paper execution
 10. Source-neutral market-data provider contract
+11. External historical-data adapter with dataset provenance
 
 ## Service
 
@@ -42,13 +43,6 @@ Set `ATSF_REGISTRY_PATH` to point the service at a persistent SQLite registry. T
 
 Operational endpoints support an optional shared API key through `ATSF_API_KEY`. When configured, clients must send `X-API-Key: <key>`; `/health` remains unauthenticated for container healthchecks.
 
-Example:
-
-```bash
-ATSF_API_KEY='replace-with-a-long-random-secret' \
-  uvicorn atsf.api:app --host 127.0.0.1 --port 8000
-```
-
 For any non-local deployment, configure authentication and place the service behind a properly secured reverse proxy or private network. Do not expose the unauthenticated default directly to the public internet.
 
 ## Docker
@@ -63,8 +57,12 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 
 ## Market-data providers
 
-`atsf.provider.MarketDataProvider` defines the vendor-neutral contract. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution. A production vendor adapter should fetch data, normalize it to the canonical OHLCV schema, call `validate_market_data`, and expose it through the same contract.
+`atsf.provider.MarketDataProvider` defines the vendor-neutral contract. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution.
+
+`atsf.alphavantage.AlphaVantageDailyProvider` is the first external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
+
+External data must enter the system through the provider/ingestion boundary and be fingerprinted into a dataset bundle before research or paper execution. This prevents silent changes in source, timeframe, schema, or underlying bars from masquerading as the same dataset.
 
 ## Status
 
-Research-first foundation with deterministic paper execution. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
+Research-first foundation with deterministic paper execution and the first real external historical-data adapter. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
