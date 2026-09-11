@@ -2,7 +2,9 @@ services:
   atsf:
     build: .
     ports:
-      - "8000:8000"
+      # Bind the development container to localhost by default. Put an authenticated
+      # reverse proxy in front of it before exposing the service to a network.
+      - "127.0.0.1:8000:8000"
     environment:
       ATSF_REGISTRY_PATH: /data/atsf.sqlite3
     volumes:
