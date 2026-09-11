@@ -9,21 +9,16 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 from .data import validate_market_data
+from .provider import ProviderMetadata
 
 
 JsonTransport = Callable[[str], bytes]
 
 
 class AlphaVantageDailyProvider:
-    """Alpha Vantage daily OHLCV provider normalized to ATSF's canonical schema.
+    """Alpha Vantage daily OHLCV provider normalized to ATSF's canonical schema."""
 
-    The adapter is historical-data only: it uses TIME_SERIES_DAILY and never
-    places orders.  Full history availability depends on the vendor plan.
-    """
-
-    source = "alphavantage"
-    timeframe = "1d"
-    schema_version = "ohlcv.v1"
+    _metadata = ProviderMetadata("alphavantage", "1d", "ohlcv.v1")
 
     def __init__(
         self,
@@ -43,6 +38,10 @@ class AlphaVantageDailyProvider:
         self._timeout = timeout
         self._outputsize = outputsize
         self._transport = transport or self._fetch
+
+    @property
+    def metadata(self) -> ProviderMetadata:
+        return self._metadata
 
     def _fetch(self, url: str) -> bytes:
         request = Request(url, headers={"User-Agent": "atsf/0.1"})
