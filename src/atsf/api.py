@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .data import dataset_identity, validate_market_data
 from .portfolio_executor import execute_persisted_portfolio
+from .portfolio_replay import verify_persisted_portfolio_run
 from .registry import ExperimentRegistry
 from .research import run_research
 from .strategy import StrategySpec
@@ -103,6 +104,20 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
+
+    @app.get("/runs/{run_id}/verify")
+    def verify_run(run_id: str, store: Store, _auth: Protected) -> dict:
+        try:
+            verification = verify_persisted_portfolio_run(store, run_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "run_id": verification.run_id,
+            "valid": verification.valid,
+            "reason": verification.reason,
+            "event_count": verification.manifest.event_count,
+            "ledger_fingerprint": verification.manifest.ledger_fingerprint,
+        }
 
     @app.post("/research/runs", status_code=201)
     def research_run(request: ResearchRunRequest, store: Store, _auth: Protected) -> dict:
