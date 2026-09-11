@@ -36,6 +36,11 @@ class PaperRunRequest(BaseModel):
     max_drawdown: float | None = Field(default=None, gt=0, lt=1)
 
 
+class ReplayVerificationRequest(BaseModel):
+    dataset_version: str = Field(min_length=1)
+    data: dict[str, list[MarketBar]] = Field(min_length=1)
+
+
 class ResearchRunRequest(BaseModel):
     dataset_id: str = Field(min_length=1)
     data: list[MarketBar] = Field(min_length=1)
@@ -111,6 +116,31 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             verification = verify_persisted_portfolio_run(store, run_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "run_id": verification.run_id,
+            "valid": verification.valid,
+            "reason": verification.reason,
+            "event_count": verification.manifest.event_count,
+            "ledger_fingerprint": verification.manifest.ledger_fingerprint,
+        }
+
+    @app.post("/runs/{run_id}/verify-replay")
+    def verify_replay(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
+        try:
+            frames: dict[str, pd.DataFrame] = {}
+            for strategy_id, bars in request.data.items():
+                frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
+                frames[strategy_id] = validate_market_data(frame)
+            run = store.get_portfolio_run(run_id)
+            if run is None:
+                raise HTTPException(status_code=404, detail="paper run not found")
+            if run.get("provenance", {}).get("dataset_version") != request.dataset_version:
+                raise HTTPException(status_code=400, detail="dataset_version does not match persisted run")
+            verification = verify_persisted_portfolio_run(store, run_id, data=frames)
+        except HTTPException:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "run_id": verification.run_id,
             "valid": verification.valid,
