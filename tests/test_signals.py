@@ -44,7 +44,6 @@ def test_strategy_signals_resolve_indicator_names():
     assert not exit_.any()
 
 
-def test_unknown_indicator_is_rejected():
-    data = make_data()
-    with pytest.raises(ValueError, match="unsupported indicator"):
-        compute_indicators(data, [Indicator(name="macd", period=12)])
+def test_unknown_indicator_is_rejected_at_dsl_boundary():
+    with pytest.raises(ValueError, match="indicator kind is required"):
+        Indicator(name="macd", period=12)
