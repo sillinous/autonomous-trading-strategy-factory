@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
-from .research_queue import ResearchRequest
+from .research_queue import ResearchReason, ResearchRequest
 from .registry import ExperimentRegistry
 
 
@@ -11,7 +10,6 @@ class ResearchRequestStore:
     """Immutable persistence for autonomous replacement-research requests."""
 
     def __init__(self, registry: ExperimentRegistry) -> None:
-        self._registry = registry
         self._connection = registry._connection
         self._connection.execute(
             """
@@ -55,6 +53,8 @@ class ResearchRequestStore:
         return request
 
     def get(self, request_id: str) -> ResearchRequest | None:
+        if not request_id:
+            raise ValueError("request_id cannot be empty")
         row = self._connection.execute(
             "SELECT request_json FROM research_requests WHERE request_id = ?",
             (request_id,),
@@ -62,8 +62,6 @@ class ResearchRequestStore:
         if row is None:
             return None
         payload = json.loads(row[0])
-        from .research_queue import ResearchReason
-
         return ResearchRequest(
             request_id=payload["request_id"],
             source_strategy_id=payload.get("source_strategy_id"),
@@ -76,13 +74,11 @@ class ResearchRequestStore:
         if not strategy_id:
             raise ValueError("strategy_id cannot be empty")
         rows = self._connection.execute(
-            "SELECT request_json FROM research_requests ORDER BY request_id"
+            "SELECT request_id FROM research_requests ORDER BY request_id"
         ).fetchall()
         requests = []
-        for row in rows:
-            payload = json.loads(row[0])
-            if payload.get("source_strategy_id") == strategy_id:
-                request = self.get(payload["request_id"])
-                if request is not None:
-                    requests.append(request)
+        for (request_id,) in rows:
+            request = self.get(request_id)
+            if request is not None and request.source_strategy_id == strategy_id:
+                requests.append(request)
         return tuple(requests)
