@@ -73,6 +73,11 @@ class ExperimentRegistry:
                 PRIMARY KEY (run_id, event_id), UNIQUE (run_id, sequence), FOREIGN KEY (run_id) REFERENCES portfolio_runs(run_id),
                 FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id)
             );
+            CREATE TABLE IF NOT EXISTS reproducibility_certificates (
+                certificate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE, certificate_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES portfolio_runs(run_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_experiments_dataset ON experiments(dataset_id, dataset_version);
             CREATE INDEX IF NOT EXISTS idx_experiments_strategy ON experiments(strategy_id);
             CREATE INDEX IF NOT EXISTS idx_portfolio_audit_strategy ON portfolio_audit_events(strategy_id, timestamp);
@@ -344,3 +349,52 @@ class ExperimentRegistry:
                                     "data_bundle_version": provenance["data_bundle_version"], "execution_fingerprint": provenance["execution_fingerprint"],
                                     "execution_config": json.loads(provenance["execution_config_json"])}
         return result
+
+    def save_reproducibility_certificate(self, certificate: Any) -> None:
+        """Persist a certificate once; never overwrite a historical attestation."""
+        run_id = str(certificate.run_id)
+        certificate_id = str(certificate.certificate_id)
+        if not run_id or not certificate_id:
+            raise ValueError("certificate run_id and certificate_id are required")
+        if self.get_portfolio_run(run_id) is None:
+            raise ValueError(f"unknown portfolio run: {run_id}")
+        payload = json.dumps(
+            {
+                "run_id": run_id,
+                "certificate_id": certificate_id,
+                "provenance_schema_version": certificate.provenance_schema_version,
+                "verified": bool(certificate.verified),
+                "dataset_version": certificate.dataset_version,
+                "data_bundle_version": certificate.data_bundle_version,
+                "execution_fingerprint": certificate.execution_fingerprint,
+                "research_fingerprint": certificate.research_fingerprint,
+                "provenance_graph_fingerprint": certificate.provenance_graph_fingerprint,
+                "ledger_fingerprint": certificate.ledger_fingerprint,
+                "lineage_fingerprint": certificate.lineage_fingerprint,
+                "attribution_fingerprint": certificate.attribution_fingerprint,
+                "verification_fingerprint": certificate.verification_fingerprint,
+                "event_count": int(certificate.event_count),
+            },
+            sort_keys=True,
+            allow_nan=False,
+        )
+        existing = self._connection.execute(
+            "SELECT certificate_id, certificate_json FROM reproducibility_certificates WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if existing is not None:
+            if existing["certificate_id"] != certificate_id or existing["certificate_json"] != payload:
+                raise ValueError("reproducibility certificate already exists and is immutable")
+            return
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO reproducibility_certificates(certificate_id, run_id, certificate_json) VALUES (?, ?, ?)",
+                (certificate_id, run_id, payload),
+            )
+
+    def get_reproducibility_certificate(self, run_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT certificate_json FROM reproducibility_certificates WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return None if row is None else json.loads(row["certificate_json"])
