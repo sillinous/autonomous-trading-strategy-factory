@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from atsf.alphavantage import AlphaVantageDailyProvider
+from atsf.provider import ProviderMetadata
 
 
 PAYLOAD = {
@@ -44,9 +45,7 @@ def test_alpha_vantage_daily_provider_normalizes_and_filters() -> None:
     assert list(result.columns) == ["open", "high", "low", "close", "volume"]
     assert list(result.index) == [pd.Timestamp("2026-01-05")]
     assert result.iloc[0]["close"] == 108
-    assert provider.source == "alphavantage"
-    assert provider.timeframe == "1d"
-    assert provider.schema_version == "ohlcv.v1"
+    assert provider.metadata == ProviderMetadata("alphavantage", "1d", "ohlcv.v1")
 
 
 def test_alpha_vantage_daily_provider_rejects_vendor_error() -> None:
