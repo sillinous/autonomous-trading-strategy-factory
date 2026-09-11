@@ -14,6 +14,8 @@ class LineageRecord:
     def __post_init__(self) -> None:
         if self.generation < 0:
             raise ValueError("generation must be non-negative")
+        if self.strategy_id in self.parent_ids:
+            raise ValueError(f"strategy lineage cycle detected: {self.strategy_id}")
         if self.operator == "seed" and self.parent_ids:
             raise ValueError("seed strategies cannot have parents")
         if self.operator != "seed" and not self.parent_ids:
