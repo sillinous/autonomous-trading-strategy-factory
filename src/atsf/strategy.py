@@ -25,6 +25,7 @@ class Indicator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
+    kind: Literal["sma", "ema", "rsi"]
     source: str = "close"
     period: int | None = Field(default=None, gt=0)
     parameters: dict[str, float | int | str] = Field(default_factory=dict)
@@ -89,4 +90,7 @@ class StrategySpec(BaseModel):
     def validate_risk_consistency(self) -> StrategySpec:
         if self.risk.max_position > self.position_sizing.max_position:
             raise ValueError("risk.max_position cannot exceed position_sizing.max_position")
+        names = [indicator.name for indicator in self.indicators]
+        if len(names) != len(set(names)):
+            raise ValueError("indicator names must be unique")
         return self
