@@ -4,9 +4,12 @@ import pandas as pd
 
 from atsf.cached_provider import CachedMarketDataProvider
 from atsf.data_cache import MarketDataCache
+from atsf.provider import ProviderMetadata
 
 
 class CountingProvider:
+    metadata = ProviderMetadata("fixture", "1d", "ohlcv.v1")
+
     def __init__(self, frame: pd.DataFrame):
         self.frame = frame
         self.calls = 0
@@ -25,24 +28,21 @@ def frame():
     )
 
 
-def test_cached_provider_fetches_once(tmp_path):
+def test_cached_provider_fetches_once_and_preserves_metadata(tmp_path):
     source = CountingProvider(frame())
-    provider = CachedMarketDataProvider(source, MarketDataCache(tmp_path), source="fixture")
+    provider = CachedMarketDataProvider(source, MarketDataCache(tmp_path))
     start = datetime(2024, 1, 1)
     end = datetime(2024, 1, 4)
     first = provider.load("AAA", start, end)
     second = provider.load("AAA", start, end)
     assert source.calls == 1
+    assert provider.metadata == source.metadata
     pd.testing.assert_frame_equal(first, second)
 
 
-def test_cached_provider_contract_changes_use_distinct_entries(tmp_path):
+def test_cached_provider_cannot_override_source_contract(tmp_path):
     source = CountingProvider(frame())
-    cache = MarketDataCache(tmp_path)
-    daily = CachedMarketDataProvider(source, cache, source="fixture", timeframe="1d")
-    hourly = CachedMarketDataProvider(source, cache, source="fixture", timeframe="1h")
-    start = datetime(2024, 1, 1)
-    end = datetime(2024, 1, 4)
-    daily.load("AAA", start, end)
-    hourly.load("AAA", start, end)
-    assert source.calls == 2
+    provider = CachedMarketDataProvider(source, MarketDataCache(tmp_path))
+    assert provider.metadata.source == "fixture"
+    assert provider.metadata.timeframe == "1d"
+    assert provider.metadata.schema_version == "ohlcv.v1"
