@@ -5,6 +5,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .feedback_provenance import FeedbackProvenance, verify_feedback_provenance
+from .feedback_registry import FeedbackEventStore
 from .registry import ExperimentRegistry
 
 PROVENANCE_GRAPH_SCHEMA_VERSION = "1"
@@ -303,6 +305,79 @@ def build_research_provenance_graph(
                 raise ValueError(f"missing strategy graph node: {strategy_key}")
             source = strategy_node.node_id
         normalized_edges.append(ProvenanceEdge(source, edge.target, edge.relation))
+
+    feedback_store = FeedbackEventStore(store)
+    for strategy_id in sorted(strategy_ids):
+        for event_payload in feedback_store.list_for_strategy(strategy_id):
+            try:
+                event = FeedbackProvenance(
+                    event_id=str(event_payload["event_id"]),
+                    strategy_id=str(event_payload["strategy_id"]),
+                    previous_state=str(event_payload["previous_state"]),
+                    resulting_state=str(event_payload["resulting_state"]),
+                    report_fingerprint=str(event_payload["report_fingerprint"]),
+                    research_request_id=(
+                        None
+                        if event_payload.get("research_request_id") is None
+                        else str(event_payload["research_request_id"])
+                    ),
+                    research_fingerprint=(
+                        None
+                        if event_payload.get("research_fingerprint") is None
+                        else str(event_payload["research_fingerprint"])
+                    ),
+                    fingerprint=str(event_payload["fingerprint"]),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"feedback provenance is malformed: {strategy_id}") from exc
+            if event.strategy_id != strategy_id or not verify_feedback_provenance(event):
+                raise ValueError(f"feedback provenance is invalid: {event.event_id}")
+
+            feedback_node = _node(
+                "feedback_event",
+                event.event_id,
+                {
+                    "event_id": event.event_id,
+                    "strategy_id": event.strategy_id,
+                    "previous_state": event.previous_state,
+                    "resulting_state": event.resulting_state,
+                    "report_fingerprint": event.report_fingerprint,
+                    "research_request_id": event.research_request_id,
+                    "research_fingerprint": event.research_fingerprint,
+                    "fingerprint": event.fingerprint,
+                },
+            )
+            nodes[f"feedback:{event.event_id}"] = feedback_node
+            strategy_node = nodes.get(f"strategy:{strategy_id}")
+            if strategy_node is None:
+                raise ValueError(f"missing strategy graph node: {strategy_id}")
+            normalized_edges.append(
+                _edge(strategy_node, feedback_node, "experienced_feedback")
+            )
+
+            state_node = _node(
+                "lifecycle_state",
+                f"{event.event_id}:{event.resulting_state}",
+                {"state": event.resulting_state, "event_id": event.event_id},
+            )
+            nodes[f"state:{event.event_id}"] = state_node
+            normalized_edges.append(_edge(feedback_node, state_node, "transitioned_to"))
+
+            if event.research_request_id is not None:
+                request_node = _node(
+                    "research_request",
+                    event.research_request_id,
+                    {
+                        "request_id": event.research_request_id,
+                        "source_strategy_id": event.strategy_id,
+                        "feedback_event_id": event.event_id,
+                        "research_fingerprint": event.research_fingerprint,
+                    },
+                )
+                nodes[f"research_request:{event.research_request_id}"] = request_node
+                normalized_edges.append(
+                    _edge(feedback_node, request_node, "generated_research_request")
+                )
 
     attribution = run.get("attribution")
     if not isinstance(attribution, list) or not attribution:
