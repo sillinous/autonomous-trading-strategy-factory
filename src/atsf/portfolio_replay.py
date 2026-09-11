@@ -8,7 +8,7 @@ from .dataset_bundle import bundle_identity
 from .execution_lineage import FillLineage, verify_fill_lineage
 from .execution_manifest import ExecutionManifest, execution_manifest
 from .ledger_replay import validate_execution_ledger
-from .portfolio_audit import PortfolioAuditEvent
+from .portfolio_audit import PortfolioAuditEvent, audit_event_id
 from .portfolio_run import build_portfolio_run_identity
 from .registry import ExperimentRegistry
 from .signals import strategy_signals
@@ -125,9 +125,8 @@ def verify_persisted_portfolio_run(
     lineage = _stored_lineage(config, run_id, actual)
     if isinstance(lineage, ReplayVerification):
         return lineage
-    expected_event_ids = tuple(item.event_id for item in lineage)
-    actual_event_ids = tuple(__import__("atsf.portfolio_audit", fromlist=["audit_event_id"]).audit_event_id(event) for event in sorted(events, key=lambda item: item.sequence))
-    if expected_event_ids != actual_event_ids:
+    ordered_events = tuple(sorted(events, key=lambda item: item.sequence))
+    if tuple(item.event_id for item in lineage) != tuple(audit_event_id(event) for event in ordered_events):
         return _failure(run_id, "stored fill lineage event IDs do not match the audit ledger", actual)
 
     if provenance.get("dataset_id") != portfolio["definition"].get("dataset_id"):
@@ -176,9 +175,9 @@ def verify_persisted_portfolio_run(
             strategies[strategy_id] = strategy
         try:
             signals = {strategy_id: strategy_signals(data[strategy_id], strategy) for strategy_id, strategy in strategies.items()}
-            liquidation_timestamp = pd.Timestamp(events[-1].timestamp) if bool(run["halted"]) and events else None
+            liquidation_timestamp = pd.Timestamp(ordered_events[-1].timestamp) if bool(run["halted"]) and ordered_events else None
             if not verify_fill_lineage(
-                tuple(sorted(events, key=lambda item: item.sequence)),
+                ordered_events,
                 lineage,
                 signals,
                 halted=bool(run["halted"]),
