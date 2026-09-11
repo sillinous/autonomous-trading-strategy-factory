@@ -6,7 +6,7 @@ from math import isfinite
 import pandas as pd
 
 from .dataset_bundle import bundle_identity
-from .execution_lineage import build_fill_lineage
+from .execution_lineage import build_fill_lineage, verify_fill_lineage
 from .execution_manifest import execution_manifest
 from .paper import PaperBroker, PaperConfig
 from .portfolio_attribution import PortfolioAttribution
@@ -129,7 +129,16 @@ def execute_persisted_portfolio(
 
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
     signals = {strategy_id: strategy_signals(data[strategy_id], strategies[strategy_id]) for strategy_id in strategies}
-    lineage = build_fill_lineage(audit_events, signals, halted=paper.halted)
+    liquidation_timestamp = paper.snapshots[-1].timestamp if paper.halted and paper.snapshots else None
+    lineage = build_fill_lineage(audit_events, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp)
+    if not verify_fill_lineage(
+        audit_events,
+        lineage,
+        signals,
+        halted=paper.halted,
+        liquidation_timestamp=liquidation_timestamp,
+    ):
+        raise ValueError("deterministic fill-lineage verification failed")
     manifest = execution_manifest(audit_events)
     persisted_execution_config = {
         **execution_config,
