@@ -29,18 +29,18 @@ def _rsi(series: pd.Series, period: int) -> pd.Series:
 
 
 def compute_indicators(data: pd.DataFrame, indicators: list[Indicator]) -> dict[str, pd.Series]:
-    """Compute the small, deterministic indicator vocabulary supported by the DSL."""
+    """Compute deterministic indicators using the DSL's explicit ``kind`` field."""
     values: dict[str, pd.Series] = {}
     for indicator in indicators:
-        name = indicator.name.lower()
-        if name not in SUPPORTED_INDICATORS:
-            raise ValueError(f"unsupported indicator: {indicator.name}")
+        kind = indicator.kind.lower()
+        if kind not in SUPPORTED_INDICATORS:
+            raise ValueError(f"unsupported indicator: {kind}")
         if indicator.period is None:
             raise ValueError(f"indicator {indicator.name} requires a period")
         source = _source(data, indicator.source)
-        if name == "sma":
+        if kind == "sma":
             result = source.rolling(indicator.period, min_periods=indicator.period).mean()
-        elif name == "ema":
+        elif kind == "ema":
             result = source.ewm(
                 span=indicator.period, adjust=False, min_periods=indicator.period
             ).mean()
