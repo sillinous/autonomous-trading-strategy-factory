@@ -40,7 +40,7 @@ def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, st
     strategies = [make_strategy("one", 3), make_strategy("two", 4)]
     ids = [registry.save_strategy(strategy) for strategy in strategies]
     data = {ids[0]: make_data(), ids[1]: make_data()}
-    data_bundle_version = bundle_identity(data, "prices").version
+    data_bundle_version = bundle_identity(data, "prices", source="fixture", timeframe="1d").version
     registry.register_dataset(
         DatasetBundleIdentity("prices", "v1", ("TEST",), 12, "2026-01-01T00:00:00", "2026-01-12T00:00:00"),
         source="fixture",
@@ -58,6 +58,9 @@ def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, st
             "dataset_id": "prices",
             "dataset_version": "v1",
             "data_bundle_version": data_bundle_version,
+            "data_source": "fixture",
+            "data_timeframe": "1d",
+            "data_schema_version": "ohlcv.v1",
             "experiment_ids": experiment_ids,
         },
         {ids[0]: 0.6, ids[1]: 0.3},
