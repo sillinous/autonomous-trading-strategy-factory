@@ -61,8 +61,9 @@ class FrameMarketDataProvider:
         frame = self._frames[symbol]
         if start is not None:
             frame = frame.loc[frame.index >= start]
+        # Historical API semantics use an exclusive upper bound.
         if end is not None:
-            frame = frame.loc[frame.index <= end]
+            frame = frame.loc[frame.index < end]
         if frame.empty:
             raise ValueError("requested market-data range is empty")
         return frame.copy()
