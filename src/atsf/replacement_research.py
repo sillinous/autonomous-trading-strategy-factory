@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .generator import StrategyCandidate, StrategyGenerator
+from .lineage import LineageRecord
 from .research_queue import ResearchRequest
 from .research_registry import ResearchRequestStore
 from .registry import ExperimentRegistry
@@ -42,7 +43,7 @@ def generate_replacements(
     for candidate in candidates:
         strategy_identifier = registry.save_strategy(candidate.strategy)
         registry.save_lineage(
-            __import__("atsf.lineage", fromlist=["LineageRecord"]).LineageRecord(
+            LineageRecord(
                 strategy_id=strategy_identifier,
                 generation=1,
                 parent_ids=(() if candidate.parent_strategy_id is None else (candidate.parent_strategy_id,)),
