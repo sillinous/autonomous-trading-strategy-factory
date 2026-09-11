@@ -126,23 +126,21 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "schema_version": graph.schema_version,
             "fingerprint": graph.fingerprint,
             "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "kind": node.kind,
-                    "key": node.key,
-                    "attributes": node.attributes,
-                }
+                {"node_id": node.node_id, "kind": node.kind, "key": node.key, "attributes": node.attributes}
                 for node in graph.nodes
             ],
             "edges": [
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "relation": edge.relation,
-                }
+                {"source": edge.source, "target": edge.target, "relation": edge.relation}
                 for edge in graph.edges
             ],
         }
+
+    @app.get("/runs/{run_id}/certificate")
+    def get_certificate(run_id: str, store: Store, _auth: Protected) -> dict:
+        certificate = store.get_reproducibility_certificate(run_id)
+        if certificate is None:
+            raise HTTPException(status_code=404, detail="reproducibility certificate not found")
+        return certificate
 
     @app.get("/runs/{run_id}/verify")
     def verify_run(run_id: str, store: Store, _auth: Protected) -> dict:
@@ -199,6 +197,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             if not verification.valid:
                 raise HTTPException(status_code=409, detail=verification.reason or "replay verification failed")
             certificate_result = build_reproducibility_certificate(store, run, verification)
+            store.save_reproducibility_certificate(certificate_result)
         except HTTPException:
             raise
         except (TypeError, ValueError) as exc:
@@ -208,19 +207,12 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.post("/research/runs", status_code=201)
     def research_run(request: ResearchRunRequest, store: Store, _auth: Protected) -> dict:
         try:
-            frame = validate_market_data(
-                pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp")
-            )
+            frame = validate_market_data(pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp"))
             identity = dataset_identity(frame, request.dataset_id)
             result = run_research(
-                request.seeds,
-                frame,
-                generations=request.generations,
-                population_size=request.population_size,
-                survivor_count=request.survivor_count,
-                seed=request.seed,
-                dataset_id=request.dataset_id,
-                registry=store,
+                request.seeds, frame, generations=request.generations,
+                population_size=request.population_size, survivor_count=request.survivor_count,
+                seed=request.seed, dataset_id=request.dataset_id, registry=store,
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -242,14 +234,9 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             if store.get_portfolio(portfolio_id) is None:
                 raise HTTPException(status_code=404, detail="portfolio not found")
             result = execute_persisted_portfolio(
-                store,
-                portfolio_id,
-                frames,
-                dataset_version=request.dataset_version,
-                initial_cash=request.initial_cash,
-                commission_bps=request.commission_bps,
-                slippage_bps=request.slippage_bps,
-                max_drawdown=request.max_drawdown,
+                store, portfolio_id, frames, dataset_version=request.dataset_version,
+                initial_cash=request.initial_cash, commission_bps=request.commission_bps,
+                slippage_bps=request.slippage_bps, max_drawdown=request.max_drawdown,
             )
         except HTTPException:
             raise
