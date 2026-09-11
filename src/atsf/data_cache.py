@@ -74,7 +74,8 @@ class MarketDataCache:
                 restored = restored.astype(dict(zip(restored.columns, stored_dtypes, strict=True)))
             restored = validate_market_data(restored)
             if manifest.get("index_freq"):
-                restored.index.freq = pd.tseries.frequencies.to_offset(manifest["index_freq"])
+                offset = pd.tseries.frequencies.to_offset(manifest["index_freq"])
+                restored.index = pd.DatetimeIndex(restored.index, freq=offset)
             if frame_fingerprint(restored) != manifest.get("frame_fingerprint"):
                 return None
             return restored.copy()
