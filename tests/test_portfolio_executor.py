@@ -70,7 +70,7 @@ def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, st
 
 def test_executor_uses_persisted_members_and_saves_run():
     registry = ExperimentRegistry()
-    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
+    first, second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
     result = execute_persisted_portfolio(registry, "portfolio-1", {first: make_data(), second: make_data()}, dataset_version=dataset_version)
     assert result.identity.portfolio_id == "portfolio-1"
     assert result.identity.dataset_version == dataset_version
@@ -82,6 +82,11 @@ def test_executor_uses_persisted_members_and_saves_run():
     assert stored["final_equity"] == pytest.approx(result.paper.final_equity)
     assert len(stored["attribution"]) == 2
     assert [item["sequence"] for item in stored["audit_events"]] == list(range(len(result.audit_events)))
+    assert stored["provenance"]["dataset_id"] == "prices"
+    assert stored["provenance"]["dataset_version"] == dataset_version
+    assert stored["provenance"]["data_bundle_version"] == bundle_version
+    assert stored["provenance"]["execution_fingerprint"] == result.identity.execution_fingerprint
+    assert stored["provenance"]["execution_config"]["initial_cash"] == 100_000.0
     registry.close()
 
 
@@ -106,10 +111,45 @@ def test_executor_rejects_dataset_version_mismatch():
     registry.close()
 
 
+def test_atomic_execution_rejects_invalid_audit_without_partial_rows():
+    registry = ExperimentRegistry()
+    first, second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
+    audit = [PortfolioAuditEvent(1, first, "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.01)]
+    attribution = [
+        {"strategy_id": first, "return_contribution": 0.01, "risk_contribution": 0.02},
+        {"strategy_id": second, "return_contribution": 0.01, "risk_contribution": 0.02},
+    ]
+    with pytest.raises(ValueError, match="contiguous"):
+        registry.save_portfolio_execution(
+            "atomic-failure",
+            "portfolio-1",
+            100_000.0,
+            False,
+            None,
+            attribution,
+            dataset_id="prices",
+            dataset_version=dataset_version,
+            data_bundle_version=bundle_version,
+            execution_fingerprint="fingerprint",
+            execution_config={"initial_cash": 100_000.0},
+            audit_events=audit,
+        )
+    assert registry.get_portfolio_run("atomic-failure") is None
+    assert registry._connection.execute("SELECT COUNT(*) FROM portfolio_run_provenance WHERE run_id = ?", ("atomic-failure",)).fetchone()[0] == 0
+    assert registry._connection.execute("SELECT COUNT(*) FROM portfolio_attribution WHERE run_id = ?", ("atomic-failure",)).fetchone()[0] == 0
+    assert registry._connection.execute("SELECT COUNT(*) FROM portfolio_audit_events WHERE run_id = ?", ("atomic-failure",)).fetchone()[0] == 0
+    registry.close()
+
+
 def test_registry_audit_ledger_rejects_gaps_and_non_members():
     registry = ExperimentRegistry()
-    first, _second, _dataset_version, _bundle_version = seed_persisted_portfolio(registry)
-    registry.save_portfolio_run("manual-run", "portfolio-1", 100_000.0, False, None, [])
+    first, _second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
+    registry.save_portfolio_run(
+        "manual-run", "portfolio-1", 100_000.0, False, None, [],
+        dataset_id="prices", dataset_version=dataset_version,
+        data_bundle_version=bundle_version, execution_fingerprint="manual",
+        execution_config={"initial_cash": 100_000.0},
+    )
     event = PortfolioAuditEvent(1, first, "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.01)
     with pytest.raises(ValueError, match="contiguous"):
         registry.save_portfolio_audit_events("manual-run", [event])
