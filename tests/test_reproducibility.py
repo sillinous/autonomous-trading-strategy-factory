@@ -2,11 +2,17 @@ import json
 
 import pytest
 
+from atsf.feedback_loop import process_strategy_health
+from atsf.feedback_provenance import build_feedback_provenance
+from atsf.feedback_registry import FeedbackEventStore
+from atsf.lifecycle import StrategyLifecycle
+from atsf.monitoring import DegradationReport
 from atsf.portfolio_executor import execute_persisted_portfolio
 from atsf.portfolio_replay import verify_persisted_portfolio_run
 from atsf.provenance_graph import build_research_provenance_graph
 from atsf.reproducibility import build_reproducibility_certificate
 from atsf.registry import ExperimentRegistry
+from atsf.research_queue import ResearchQueue
 from tests.test_portfolio_executor import make_data, seed_persisted_portfolio
 
 
@@ -26,6 +32,26 @@ def certificate_for(registry: ExperimentRegistry, run_id: str):
     assert verification.valid is True
     run = registry.get_portfolio_run(run_id)
     return build_reproducibility_certificate(registry, run, verification)
+
+
+def make_feedback_event(strategy_id: str):
+    report = DegradationReport(
+        degraded=True,
+        observations=30,
+        total_return=-0.12,
+        max_drawdown=-0.22,
+        volatility=0.08,
+        reasons=("minimum return breached",),
+    )
+    lifecycle = StrategyLifecycle()
+    queue = ResearchQueue()
+    action = process_strategy_health(strategy_id, lifecycle, report, queue)
+    return build_feedback_provenance(
+        strategy_id,
+        action,
+        report,
+        previous_state="active",
+    )
 
 
 def test_reproducibility_certificate_is_deterministic() -> None:
@@ -80,6 +106,55 @@ def test_provenance_graph_covers_research_to_paper_chain() -> None:
     } <= relations
     assert len(graph.fingerprint) == 24
     assert graph == build_research_provenance_graph(registry, run)
+    registry.close()
+
+
+def test_provenance_graph_binds_persisted_feedback_and_research_request() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    run = registry.get_portfolio_run(result.identity.run_id)
+    baseline = build_research_provenance_graph(registry, run)
+    strategy_id = run["attribution"][0]["strategy_id"]
+
+    event = make_feedback_event(strategy_id)
+    FeedbackEventStore(registry).save(event)
+    changed = build_research_provenance_graph(registry, run)
+
+    kinds = {node.kind for node in changed.nodes}
+    assert {"feedback_event", "lifecycle_state", "research_request"} <= kinds
+    relations = {edge.relation for edge in changed.edges}
+    assert {
+        "experienced_feedback",
+        "transitioned_to",
+        "generated_research_request",
+    } <= relations
+    assert changed.fingerprint != baseline.fingerprint
+    assert any(
+        node.kind == "feedback_event" and node.key == event.event_id
+        for node in changed.nodes
+    )
+    assert any(
+        node.kind == "research_request" and node.key == event.research_request_id
+        for node in changed.nodes
+    )
+    registry.close()
+
+
+def test_provenance_graph_rejects_tampered_feedback_event() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    run = registry.get_portfolio_run(result.identity.run_id)
+    strategy_id = run["attribution"][0]["strategy_id"]
+    event = make_feedback_event(strategy_id)
+    store = FeedbackEventStore(registry)
+    store.save(event)
+    registry._connection.execute(
+        "UPDATE strategy_feedback_events SET event_json = ? WHERE event_id = ?",
+        ('{"fingerprint":"tampered"}', event.event_id),
+    )
+    registry._connection.commit()
+    with pytest.raises(ValueError, match="feedback provenance is invalid"):
+        build_research_provenance_graph(registry, run)
     registry.close()
 
 
