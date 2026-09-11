@@ -10,6 +10,7 @@ import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
@@ -72,17 +73,12 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if owned_registry:
             store.close()
 
-    app = FastAPI(
-        title="Autonomous Trading Strategy Factory",
-        version="0.1.0",
-        lifespan=lifespan,
-    )
+    app = FastAPI(title="Autonomous Trading Strategy Factory", version="0.1.0", lifespan=lifespan)
 
     def get_store() -> ExperimentRegistry:
         return store
 
     def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
-        """Require an API key when the service is configured for authenticated operation."""
         configured_key = os.getenv("ATSF_API_KEY")
         if configured_key and (x_api_key is None or not secrets.compare_digest(x_api_key, configured_key)):
             raise HTTPException(status_code=401, detail="invalid or missing API key")
@@ -121,19 +117,9 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             graph = build_research_provenance_graph(store, run)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {
-            "run_id": run_id,
-            "schema_version": graph.schema_version,
-            "fingerprint": graph.fingerprint,
-            "nodes": [
-                {"node_id": node.node_id, "kind": node.kind, "key": node.key, "attributes": node.attributes}
-                for node in graph.nodes
-            ],
-            "edges": [
-                {"source": edge.source, "target": edge.target, "relation": edge.relation}
-                for edge in graph.edges
-            ],
-        }
+        return {"run_id": run_id, "schema_version": graph.schema_version, "fingerprint": graph.fingerprint,
+                "nodes": [{"node_id": n.node_id, "kind": n.kind, "key": n.key, "attributes": n.attributes} for n in graph.nodes],
+                "edges": [{"source": e.source, "target": e.target, "relation": e.relation} for e in graph.edges]}
 
     @app.get("/runs/{run_id}/certificate")
     def get_certificate(run_id: str, store: Store, _auth: Protected) -> dict:
@@ -142,27 +128,26 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="reproducibility certificate not found")
         return certificate
 
+    @app.get("/runs/{run_id}/certificate/verify")
+    def verify_certificate(run_id: str, store: Store, _auth: Protected) -> dict:
+        result = verify_persisted_certificate(store, run_id)
+        if not result.valid and result.reason == "reproducibility certificate not found":
+            raise HTTPException(status_code=404, detail=result.reason)
+        return {"run_id": result.run_id, "certificate_id": result.certificate_id, "valid": result.valid, "reason": result.reason}
+
     @app.get("/runs/{run_id}/verify")
     def verify_run(run_id: str, store: Store, _auth: Protected) -> dict:
         try:
             verification = verify_persisted_portfolio_run(store, run_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {
-            "run_id": verification.run_id,
-            "valid": verification.valid,
-            "reason": verification.reason,
-            "event_count": verification.manifest.event_count,
-            "ledger_fingerprint": verification.manifest.ledger_fingerprint,
-        }
+        return {"run_id": verification.run_id, "valid": verification.valid, "reason": verification.reason,
+                "event_count": verification.manifest.event_count, "ledger_fingerprint": verification.manifest.ledger_fingerprint}
 
     @app.post("/runs/{run_id}/verify-replay")
     def verify_replay(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
         try:
-            frames: dict[str, pd.DataFrame] = {}
-            for strategy_id, bars in request.data.items():
-                frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
-                frames[strategy_id] = validate_market_data(frame)
+            frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             run = store.get_portfolio_run(run_id)
             if run is None:
                 raise HTTPException(status_code=404, detail="paper run not found")
@@ -173,21 +158,13 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             raise
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "run_id": verification.run_id,
-            "valid": verification.valid,
-            "reason": verification.reason,
-            "event_count": verification.manifest.event_count,
-            "ledger_fingerprint": verification.manifest.ledger_fingerprint,
-        }
+        return {"run_id": verification.run_id, "valid": verification.valid, "reason": verification.reason,
+                "event_count": verification.manifest.event_count, "ledger_fingerprint": verification.manifest.ledger_fingerprint}
 
     @app.post("/runs/{run_id}/certificate")
     def certificate(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
         try:
-            frames: dict[str, pd.DataFrame] = {}
-            for strategy_id, bars in request.data.items():
-                frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
-                frames[strategy_id] = validate_market_data(frame)
+            frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             run = store.get_portfolio_run(run_id)
             if run is None:
                 raise HTTPException(status_code=404, detail="paper run not found")
@@ -209,52 +186,32 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         try:
             frame = validate_market_data(pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp"))
             identity = dataset_identity(frame, request.dataset_id)
-            result = run_research(
-                request.seeds, frame, generations=request.generations,
-                population_size=request.population_size, survivor_count=request.survivor_count,
-                seed=request.seed, dataset_id=request.dataset_id, registry=store,
-            )
+            result = run_research(request.seeds, frame, generations=request.generations, population_size=request.population_size,
+                                  survivor_count=request.survivor_count, seed=request.seed, dataset_id=request.dataset_id, registry=store)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "dataset_id": identity.dataset_id,
-            "dataset_version": identity.version,
-            "generations": len(result.generations),
-            "final_population_size": len(result.final_population),
-            "portfolio_id": result.portfolio_id,
-        }
+        return {"dataset_id": identity.dataset_id, "dataset_version": identity.version, "generations": len(result.generations),
+                "final_population_size": len(result.final_population), "portfolio_id": result.portfolio_id}
 
     @app.post("/portfolios/{portfolio_id}/paper-runs", status_code=201)
     def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store, _auth: Protected) -> dict:
         try:
-            frames: dict[str, pd.DataFrame] = {}
-            for strategy_id, bars in request.data.items():
-                frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
-                frames[strategy_id] = validate_market_data(frame)
+            frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             if store.get_portfolio(portfolio_id) is None:
                 raise HTTPException(status_code=404, detail="portfolio not found")
-            result = execute_persisted_portfolio(
-                store, portfolio_id, frames, dataset_version=request.dataset_version,
-                initial_cash=request.initial_cash, commission_bps=request.commission_bps,
-                slippage_bps=request.slippage_bps, max_drawdown=request.max_drawdown,
-            )
+            result = execute_persisted_portfolio(store, portfolio_id, frames, dataset_version=request.dataset_version,
+                                                 initial_cash=request.initial_cash, commission_bps=request.commission_bps,
+                                                 slippage_bps=request.slippage_bps, max_drawdown=request.max_drawdown)
         except HTTPException:
             raise
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "run_id": result.identity.run_id,
-            "portfolio_id": result.identity.portfolio_id,
-            "dataset_version": result.identity.dataset_version,
-            "execution_fingerprint": result.identity.execution_fingerprint,
-            "final_equity": result.paper.final_equity,
-            "halted": result.paper.halted,
-            "halt_reason": result.paper.halt_reason,
-            "fill_count": len(result.paper.fills),
-            "audit_event_count": len(result.audit_events),
-        }
+        return {"run_id": result.identity.run_id, "portfolio_id": result.identity.portfolio_id, "dataset_version": result.identity.dataset_version,
+                "execution_fingerprint": result.identity.execution_fingerprint, "final_equity": result.paper.final_equity,
+                "halted": result.paper.halted, "halt_reason": result.paper.halt_reason, "fill_count": len(result.paper.fills),
+                "audit_event_count": len(result.audit_events)}
 
     return app
 
