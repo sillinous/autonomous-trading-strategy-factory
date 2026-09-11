@@ -22,8 +22,9 @@ def ingest_and_register(
 ) -> tuple[MarketDataSnapshot, DatasetRecord]:
     """Ingest requested ranges and atomically register provider provenance.
 
-    Registry requests treat the supplied end timestamp as inclusive while the
-    lower-level provider contract remains start-inclusive/end-exclusive.
+    The explicit timeframe assertion uses the provider's native
+    start-inclusive/end-exclusive contract. Legacy calls that omit the
+    timeframe retain the historical inclusive-end behavior.
     """
     if not dataset_id.strip():
         raise ValueError("dataset_id cannot be empty")
@@ -39,13 +40,12 @@ def ingest_and_register(
         request.symbol: provider.load(
             request.symbol,
             request.start,
-            request.end + offset if request.end is not None else None,
+            request.end + offset if request.end is not None and timeframe is None else request.end,
         )
         for request in requests
     }
     if any(frame.empty for frame in data.values()):
         raise ValueError("requested market-data range is empty")
-
     requested_bundle = bundle_identity(
         data,
         dataset_id,
