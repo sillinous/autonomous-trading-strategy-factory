@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from atsf.api import create_app
 from atsf.dataset_bundle import DatasetBundleIdentity
 from atsf.experiment import ExperimentResult, ExperimentSpec
+from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
 
@@ -24,6 +25,7 @@ def make_strategy() -> StrategySpec:
 def seed(registry: ExperimentRegistry) -> str:
     strategy = make_strategy()
     strategy_id = registry.save_strategy(strategy)
+    registry.save_lineage(LineageRecord(strategy_id=strategy_id, generation=0))
     registry.register_dataset(
         DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
         source="fixture",
@@ -36,7 +38,14 @@ def seed(registry: ExperimentRegistry) -> str:
     )
     registry.save_portfolio(
         "portfolio-1",
-        {"dataset_id": "prices", "dataset_version": "v1", "experiment_ids": {strategy_id: spec.experiment_id}},
+        {
+            "dataset_id": "prices",
+            "dataset_version": "v1",
+            "data_source": "fixture",
+            "data_timeframe": "1d",
+            "data_schema_version": "ohlcv.v1",
+            "experiment_ids": {strategy_id: spec.experiment_id},
+        },
         {strategy_id: 1.0},
     )
     return strategy_id
@@ -142,7 +151,13 @@ def test_paper_run_endpoint_executes_and_exposes_integrity_verification(monkeypa
     certificate_payload = certificate.json()
     assert certificate_payload["verified"] is True
     assert len(certificate_payload["certificate_id"]) == 24
+    assert certificate_payload["provenance_graph_fingerprint"]
     assert certificate_payload["ledger_fingerprint"] == verification.json()["ledger_fingerprint"]
+
+    graph = client.get(f"/runs/{payload['run_id']}/provenance-graph")
+    assert graph.status_code == 200
+    assert graph.json()["fingerprint"] == certificate_payload["provenance_graph_fingerprint"]
+    assert any(node["kind"] == "promotion" for node in graph.json()["nodes"])
     registry.close()
 
 
