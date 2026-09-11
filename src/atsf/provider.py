@@ -9,8 +9,26 @@ import pandas as pd
 from .data import validate_market_data
 
 
+@dataclass(frozen=True)
+class ProviderMetadata:
+    """Immutable provenance declared by the provider itself."""
+
+    source: str
+    timeframe: str
+    schema_version: str = "ohlcv.v1"
+
+    def __post_init__(self) -> None:
+        for name in ("source", "timeframe", "schema_version"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} is required")
+
+
 class MarketDataProvider(Protocol):
     """Source-neutral contract for normalized historical market data."""
+
+    @property
+    def metadata(self) -> ProviderMetadata:
+        """Return immutable provenance for all data emitted by this provider."""
 
     def load(self, symbol: str, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame:
         """Return validated OHLCV data for one symbol."""
@@ -30,16 +48,24 @@ class DataRequest:
 
 
 class FrameMarketDataProvider:
-    """Deterministic provider backed by normalized in-process frames.
+    """Deterministic provider backed by normalized in-process frames."""
 
-    Vendor adapters should implement MarketDataProvider and normalize their output
-    through ``validate_market_data`` before returning it.
-    """
-
-    def __init__(self, frames: dict[str, pd.DataFrame]) -> None:
+    def __init__(
+        self,
+        frames: dict[str, pd.DataFrame],
+        *,
+        source: str = "frame",
+        timeframe: str = "1d",
+        schema_version: str = "ohlcv.v1",
+    ) -> None:
         if not frames:
             raise ValueError("at least one symbol is required")
         self._frames = {symbol: validate_market_data(frame) for symbol, frame in frames.items()}
+        self._metadata = ProviderMetadata(source, timeframe, schema_version)
+
+    @property
+    def metadata(self) -> ProviderMetadata:
+        return self._metadata
 
     def load(self, symbol: str, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame:
         if symbol not in self._frames:
