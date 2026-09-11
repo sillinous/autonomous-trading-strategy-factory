@@ -83,4 +83,7 @@ def score_regime_stability(regimes: dict[str, pd.Series]) -> RegimeStabilityResu
         if not finite.empty: values[name] = float(finite.mean())
     if not values: raise ValueError("regimes contain no finite observations")
     covered = tuple(sorted(values))
-    return RegimeStabilityResult(float(min(values.values())), values, covered)
+    # Stability is the spread penalty: zero is perfectly consistent, negative values
+    # indicate how far the weakest regime trails the strongest regime.
+    score = float(min(values.values()) - max(values.values()))
+    return RegimeStabilityResult(score, values, covered)
