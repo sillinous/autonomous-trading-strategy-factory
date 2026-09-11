@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from atsf.provider import DataRequest, FrameMarketDataProvider
+from atsf.provider import DataRequest, FrameMarketDataProvider, ProviderMetadata
 
 
 def frame() -> pd.DataFrame:
@@ -24,6 +24,15 @@ def test_provider_validates_and_filters_range():
     assert list(result["close"]) == [2, 3]
     result.iloc[0, result.columns.get_loc("close")] = 999
     assert provider.load("TEST").iloc[0]["close"] == 1
+
+
+def test_provider_exposes_immutable_metadata():
+    provider = FrameMarketDataProvider(
+        {"TEST": frame()}, source="fixture", timeframe="1d", schema_version="ohlcv.v2"
+    )
+    assert provider.metadata == ProviderMetadata("fixture", "1d", "ohlcv.v2")
+    with pytest.raises(Exception):
+        provider.metadata.source = "spoofed"
 
 
 def test_provider_rejects_unknown_or_empty_range():
