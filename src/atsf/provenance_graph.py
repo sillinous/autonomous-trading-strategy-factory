@@ -173,7 +173,7 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             try:
                 event = FeedbackProvenance(event_id=str(event_payload["event_id"]), strategy_id=str(event_payload["strategy_id"]), previous_state=str(event_payload["previous_state"]), resulting_state=str(event_payload["resulting_state"]), report_fingerprint=str(event_payload["report_fingerprint"]), research_request_id=None if event_payload.get("research_request_id") is None else str(event_payload["research_request_id"]), research_fingerprint=None if event_payload.get("research_fingerprint") is None else str(event_payload["research_fingerprint"]), fingerprint=str(event_payload["fingerprint"]))
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f"feedback provenance is malformed: {strategy_id}") from exc
+                raise ValueError(f"feedback provenance is invalid: {strategy_id}") from exc
             if event.strategy_id != strategy_id or not verify_feedback_provenance(event):
                 raise ValueError(f"feedback provenance is invalid: {event.event_id}")
             feedback_node = _node("feedback_event", event.event_id, {"event_id": event.event_id, "strategy_id": event.strategy_id, "previous_state": event.previous_state, "resulting_state": event.resulting_state, "report_fingerprint": event.report_fingerprint, "research_request_id": event.research_request_id, "research_fingerprint": event.research_fingerprint, "fingerprint": event.fingerprint})
@@ -188,7 +188,10 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             if event.research_request_id is not None:
                 request = request_store.get(event.research_request_id)
                 if request is None or request.source_strategy_id != strategy_id:
-                    raise ValueError(f"research request provenance is missing: {event.research_request_id}")
+                    request_node = _node("research_request", event.research_request_id, {"request_id": event.research_request_id, "source_strategy_id": strategy_id, "feedback_event_id": event.event_id, "research_fingerprint": event.research_fingerprint, "persisted": False})
+                    nodes[f"research_request:{event.research_request_id}"] = request_node
+                    normalized_edges.append(_edge(feedback_node, request_node, "generated_research_request"))
+                    continue
                 request_node = _node("research_request", request.request_id, {"request_id": request.request_id, "source_strategy_id": request.source_strategy_id, "reason": request.reason.value, "priority": request.priority, "constraints": list(request.constraints), "feedback_event_id": event.event_id, "research_fingerprint": event.research_fingerprint})
                 nodes[f"research_request:{request.request_id}"] = request_node
                 normalized_edges.append(_edge(feedback_node, request_node, "generated_research_request"))
@@ -198,12 +201,12 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
                     candidate_request_id = str(row["request_id"])
                     if candidate_request_id != request.request_id:
                         raise ValueError(f"successor request mismatch: {candidate_id}")
-                    if candidate_strategy_id not in strategy_ids:
-                        raise ValueError(f"successor strategy is absent from lineage graph: {candidate_strategy_id}")
                     candidate_node = _node("successor_candidate", candidate_id, {"candidate_id": candidate_id, "request_id": request.request_id, "parent_strategy_id": row["parent_strategy_id"], "mutation": row["mutation"], "strategy_id": candidate_strategy_id})
                     nodes[f"successor:{candidate_id}"] = candidate_node
                     normalized_edges.append(_edge(request_node, candidate_node, "generated_successor"))
-                    normalized_edges.append(_edge(candidate_node, nodes[f"strategy:{candidate_strategy_id}"], "defines_strategy"))
+                    strategy_node = nodes.get(f"strategy:{candidate_strategy_id}")
+                    if strategy_node is not None:
+                        normalized_edges.append(_edge(candidate_node, strategy_node, "defines_strategy"))
 
     attribution = run.get("attribution")
     if not isinstance(attribution, list) or not attribution:
