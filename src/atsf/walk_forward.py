@@ -35,7 +35,7 @@ def walk_forward_validate(data: pd.DataFrame, candidate: StrategyCandidate, trai
     step = step or test_size
     if step <= 0:
         raise ValueError("step must be positive")
-    if len(data) < train_size + 1:
+    if len(data) < train_size + test_size:
         raise ValueError("insufficient data for one walk-forward fold")
     folds: list[WalkForwardFold] = []
     start = 0
