@@ -37,7 +37,8 @@ def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commi
     for timestamp in frame.index:
         price = float(close.loc[timestamp])
         if bool(entry.loc[timestamp]) and broker.position == 0:
-            quantity = broker.max_affordable_quantity(price) * strategy.position_sizing.max_position
+            desired = broker.cash * strategy.position_sizing.max_position / price
+            quantity = min(desired, broker.max_affordable_quantity(price))
             if quantity > 0:
                 broker.execute(timestamp, "buy", quantity, price)
         elif bool(exit_.loc[timestamp]) and broker.position > 0:
