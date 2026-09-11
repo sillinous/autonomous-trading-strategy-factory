@@ -12,15 +12,7 @@ class LedgerState:
     positions: dict[str, float]
 
 
-def validate_execution_ledger(
-    events: tuple[PortfolioAuditEvent, ...],
-    *,
-    initial_cash_by_strategy: dict[str, float],
-    commission_bps: float,
-    initial_cash: float,
-    final_equity: float,
-    tolerance: float = 1e-8,
-) -> LedgerState:
+def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initial_cash_by_strategy: dict[str, float], commission_bps: float, initial_cash: float, final_equity: float, tolerance: float = 1e-8) -> LedgerState:
     """Replay fills as accounting state and reject impossible transitions."""
     if not initial_cash_by_strategy:
         raise ValueError("initial cash by strategy cannot be empty")
@@ -36,7 +28,6 @@ def validate_execution_ledger(
         raise ValueError("strategy cash allocations must be positive and finite")
     if abs(sum(initial_cash_by_strategy.values()) - initial_cash) > tolerance:
         raise ValueError("strategy cash allocations do not reconcile to initial cash")
-
     cash = dict(initial_cash_by_strategy)
     positions = {strategy_id: 0.0 for strategy_id in initial_cash_by_strategy}
     previous_timestamp = None
@@ -53,9 +44,6 @@ def validate_execution_ledger(
         notional = event.quantity * event.price
         if notional <= 0 or not isfinite(notional):
             raise ValueError("audit fill notional is invalid")
-        expected_fee = notional * commission_bps / 10_000.0
-        if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
-            raise ValueError("audit fill fee does not match execution configuration")
         if event.action == "buy":
             required = notional + event.fee
             if required > cash[event.strategy_id] + tolerance:
@@ -67,7 +55,9 @@ def validate_execution_ledger(
                 raise ValueError("audit ledger contains a sell exceeding the strategy position")
             cash[event.strategy_id] += notional - event.fee
             positions[event.strategy_id] = max(0.0, positions[event.strategy_id] - event.quantity)
-
+        expected_fee = notional * commission_bps / 10_000.0
+        if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
+            raise ValueError("audit fill fee does not match execution configuration")
     if any(abs(position) > tolerance for position in positions.values()):
         raise ValueError("audit ledger does not end flat")
     ending_cash = sum(cash.values())
