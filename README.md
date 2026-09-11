@@ -33,10 +33,14 @@ The HTTP service is created by `atsf.api:create_app` and exposes health, capabil
 For a local service using the default registry path:
 
 ```bash
-uvicorn atsf.api:app --host 0.0.0.0 --port 8000
+uvicorn atsf.api:app --host 127.0.0.1 --port 8000
 ```
 
 Set `ATSF_REGISTRY_PATH` to point the service at a persistent SQLite registry. The `/capabilities` endpoint explicitly reports `live_execution_enabled: false`; no live broker or live-order endpoint exists.
+
+### Network exposure
+
+The service is intended to remain private until authentication and an authenticated reverse proxy are configured. The supplied Docker Compose configuration binds port 8000 to `127.0.0.1` rather than publishing it on all host interfaces. Do not expose the unauthenticated API directly to the internet.
 
 ## Docker
 
