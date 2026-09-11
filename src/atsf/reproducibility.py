@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .portfolio_replay import ReplayVerification
+from .provenance_graph import build_research_provenance_graph
 from .registry import ExperimentRegistry
 
 
@@ -21,6 +22,7 @@ class ReproducibilityCertificate:
     data_bundle_version: str
     execution_fingerprint: str
     research_fingerprint: str
+    provenance_graph_fingerprint: str
     ledger_fingerprint: str
     lineage_fingerprint: str
     attribution_fingerprint: str
@@ -139,6 +141,7 @@ def build_reproducibility_certificate(
         raise ValueError("execution provenance is incomplete")
 
     research = _research_provenance(store, run)
+    graph = build_research_provenance_graph(store, run)
     ledger_fingerprint = verification.manifest.ledger_fingerprint
     lineage_fingerprint = _fingerprint(research["lineage"])
     attribution_fingerprint = _fingerprint(research["attribution"])
@@ -160,6 +163,7 @@ def build_reproducibility_certificate(
             "dataset": research["dataset"],
             "execution_config": research["execution_config"],
             "attribution_fingerprint": attribution_fingerprint,
+            "provenance_graph_fingerprint": graph.fingerprint,
         },
         length=24,
     )
@@ -170,6 +174,7 @@ def build_reproducibility_certificate(
         "data_bundle_version": bundle_version,
         "execution_fingerprint": execution_fingerprint,
         "research_fingerprint": research_fingerprint,
+        "provenance_graph_fingerprint": graph.fingerprint,
         "ledger_fingerprint": ledger_fingerprint,
         "lineage_fingerprint": lineage_fingerprint,
         "attribution_fingerprint": attribution_fingerprint,
@@ -186,6 +191,7 @@ def build_reproducibility_certificate(
         data_bundle_version=bundle_version,
         execution_fingerprint=execution_fingerprint,
         research_fingerprint=research_fingerprint,
+        provenance_graph_fingerprint=graph.fingerprint,
         ledger_fingerprint=ledger_fingerprint,
         lineage_fingerprint=lineage_fingerprint,
         attribution_fingerprint=attribution_fingerprint,
