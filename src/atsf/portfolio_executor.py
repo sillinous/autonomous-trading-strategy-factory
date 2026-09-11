@@ -37,7 +37,7 @@ def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commi
     for timestamp in frame.index:
         price = float(close.loc[timestamp])
         if bool(entry.loc[timestamp]) and broker.position == 0:
-            quantity = broker.cash * strategy.position_sizing.max_position / price
+            quantity = broker.max_affordable_quantity(price) * strategy.position_sizing.max_position
             if quantity > 0:
                 broker.execute(timestamp, "buy", quantity, price)
         elif bool(exit_.loc[timestamp]) and broker.position > 0:
@@ -50,117 +50,52 @@ def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commi
     return pd.Series(equity, index=frame.index, dtype=float).pct_change().fillna(0.0)
 
 
-def execute_persisted_portfolio(
-    store: ExperimentRegistry,
-    portfolio_id: str,
-    data: dict[str, pd.DataFrame],
-    *,
-    dataset_version: str,
-    initial_cash: float = 100_000.0,
-    commission_bps: float = 1.0,
-    slippage_bps: float = 2.0,
-    max_drawdown: float | None = None,
-) -> PersistedPortfolioExecution:
+def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, data: dict[str, pd.DataFrame], *, dataset_version: str, initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None) -> PersistedPortfolioExecution:
     """Execute exactly the persisted portfolio definition in paper mode."""
     portfolio = store.get_portfolio(portfolio_id)
-    if portfolio is None:
-        raise ValueError(f"unknown portfolio: {portfolio_id}")
+    if portfolio is None: raise ValueError(f"unknown portfolio: {portfolio_id}")
     definition = portfolio["definition"]
     persisted_dataset_id = definition.get("dataset_id")
     persisted_bundle_version = definition.get("data_bundle_version")
-    if not isinstance(persisted_dataset_id, str) or not persisted_dataset_id.strip():
-        raise ValueError("persisted portfolio is missing a valid dataset_id")
-    if not isinstance(persisted_bundle_version, str) or not persisted_bundle_version:
-        raise ValueError("persisted portfolio is missing a data_bundle_version")
-    if definition.get("dataset_version") != dataset_version:
-        raise ValueError("dataset_version does not match the persisted portfolio")
-
+    if not isinstance(persisted_dataset_id, str) or not persisted_dataset_id.strip(): raise ValueError("persisted portfolio is missing a valid dataset_id")
+    if not isinstance(persisted_bundle_version, str) or not persisted_bundle_version: raise ValueError("persisted portfolio is missing a data_bundle_version")
+    if definition.get("dataset_version") != dataset_version: raise ValueError("dataset_version does not match the persisted portfolio")
     dataset = store.require_dataset(persisted_dataset_id, dataset_version)
     for key, expected in (("data_source", dataset.source), ("data_timeframe", dataset.timeframe), ("data_schema_version", dataset.schema_version)):
-        if definition.get(key) != expected:
-            raise ValueError(f"persisted portfolio {key} does not match the registered dataset contract")
-
+        if definition.get(key) != expected: raise ValueError(f"persisted portfolio {key} does not match the registered dataset contract")
     weights = dict(portfolio["members"])
-    if not weights or any(not isfinite(weight) or weight < 0 for weight in weights.values()):
-        raise ValueError("persisted portfolio contains invalid weights")
-    if sum(weights.values()) > 1.0 + 1e-12:
-        raise ValueError("persisted portfolio weights exceed 100% gross exposure")
-    if set(data) != set(weights):
-        raise ValueError("market data must contain exactly the persisted portfolio members")
-
+    if not weights or any(not isfinite(weight) or weight < 0 for weight in weights.values()): raise ValueError("persisted portfolio contains invalid weights")
+    if sum(weights.values()) > 1.0 + 1e-12: raise ValueError("persisted portfolio weights exceed 100% gross exposure")
+    if set(data) != set(weights): raise ValueError("market data must contain exactly the persisted portfolio members")
     bundle = bundle_identity(data, persisted_dataset_id, source=dataset.source, timeframe=dataset.timeframe, schema_version=dataset.schema_version)
-    if bundle.version != persisted_bundle_version:
-        raise ValueError("market data content does not match the persisted data bundle version")
-
-    if not isfinite(initial_cash) or initial_cash <= 0 or not isfinite(commission_bps) or commission_bps < 0 or not isfinite(slippage_bps) or slippage_bps < 0:
-        raise ValueError("execution parameters must be finite and valid")
-    if max_drawdown is not None and (not isfinite(max_drawdown) or not 0 < max_drawdown < 1):
-        raise ValueError("max_drawdown must be between zero and one")
-
+    if bundle.version != persisted_bundle_version: raise ValueError("market data content does not match the persisted data bundle version")
+    if not isfinite(initial_cash) or initial_cash <= 0 or not isfinite(commission_bps) or commission_bps < 0 or not isfinite(slippage_bps) or slippage_bps < 0: raise ValueError("execution parameters must be finite and valid")
+    if max_drawdown is not None and (not isfinite(max_drawdown) or not 0 < max_drawdown < 1): raise ValueError("max_drawdown must be between zero and one")
     experiment_ids = definition.get("experiment_ids", {})
-    if set(experiment_ids) != set(weights):
-        raise ValueError("persisted portfolio experiment IDs do not match its members")
-
-    strategies = {}
-    decisions = {}
+    if set(experiment_ids) != set(weights): raise ValueError("persisted portfolio experiment IDs do not match its members")
+    strategies = {}; decisions = {}
     for strategy_id in weights:
         strategy = store.get_strategy(strategy_id)
-        if strategy is None:
-            raise ValueError(f"persisted portfolio references unknown strategy: {strategy_id}")
+        if strategy is None: raise ValueError(f"persisted portfolio references unknown strategy: {strategy_id}")
         evidence = store.get_evaluation_evidence(experiment_ids[strategy_id])
-        if evidence is None or not isinstance(evidence.get("promotion"), dict):
-            raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
+        if evidence is None or not isinstance(evidence.get("promotion"), dict): raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
         promotion = evidence["promotion"]
         decisions[strategy_id] = PromotionDecision(stage=str(promotion["stage"]), eligible=bool(promotion["eligible"]), reasons=tuple(promotion.get("reasons", ())))
         strategies[strategy_id] = strategy
-
     execution_config = {"initial_cash": float(initial_cash), "commission_bps": float(commission_bps), "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown}
     identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights, execution_config=execution_config, data_fingerprint=bundle.version)
-    if store.get_portfolio_run(identity.run_id) is not None:
-        raise ValueError("portfolio run already exists; execution is immutable")
-
+    if store.get_portfolio_run(identity.run_id) is not None: raise ValueError("portfolio run already exists; execution is immutable")
     paper = run_paper_portfolio(data, strategies, weights, decisions=decisions, initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps, max_drawdown=max_drawdown)
     sleeve_returns = {strategy_id: _sleeve_returns(data[strategy_id], strategies[strategy_id], initial_cash=initial_cash * weights[strategy_id], commission_bps=commission_bps, slippage_bps=slippage_bps) for strategy_id in weights if weights[strategy_id] > 0}
-    if not sleeve_returns:
-        raise ValueError("persisted portfolio has no positive-weight strategies")
-    returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index()
-    returns.columns = list(sleeve_returns)
+    if not sleeve_returns: raise ValueError("persisted portfolio has no positive-weight strategies")
+    returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index(); returns.columns = list(sleeve_returns)
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
-
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
     signals = {strategy_id: strategy_signals(data[strategy_id], strategies[strategy_id]) for strategy_id in strategies}
     liquidation_timestamp = paper.snapshots[-1].timestamp if paper.halted and paper.snapshots else None
     lineage = build_fill_lineage(audit_events, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp)
-    if not verify_fill_lineage(
-        audit_events,
-        lineage,
-        signals,
-        halted=paper.halted,
-        liquidation_timestamp=liquidation_timestamp,
-    ):
-        raise ValueError("deterministic fill-lineage verification failed")
+    if not verify_fill_lineage(audit_events, lineage, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp): raise ValueError("deterministic fill-lineage verification failed")
     manifest = execution_manifest(audit_events)
-    persisted_execution_config = {
-        **execution_config,
-        "ledger_fingerprint": manifest.ledger_fingerprint,
-        "ledger_event_count": manifest.event_count,
-        "fill_lineage": [
-            {"event_id": item.event_id, "decision_id": item.decision_id, "reason": item.reason}
-            for item in lineage
-        ],
-    }
-    store.save_portfolio_execution(
-        identity.run_id,
-        portfolio_id,
-        paper.final_equity,
-        paper.halted,
-        paper.halt_reason,
-        [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions],
-        dataset_id=persisted_dataset_id,
-        dataset_version=dataset_version,
-        data_bundle_version=bundle.version,
-        execution_fingerprint=identity.execution_fingerprint,
-        execution_config=persisted_execution_config,
-        audit_events=list(audit_events),
-    )
+    persisted_execution_config = {**execution_config, "ledger_fingerprint": manifest.ledger_fingerprint, "ledger_event_count": manifest.event_count, "fill_lineage": [{"event_id": item.event_id, "decision_id": item.decision_id, "reason": item.reason} for item in lineage]}
+    store.save_portfolio_execution(identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason, [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions], dataset_id=persisted_dataset_id, dataset_version=dataset_version, data_bundle_version=bundle.version, execution_fingerprint=identity.execution_fingerprint, execution_config=persisted_execution_config, audit_events=list(audit_events))
     return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
