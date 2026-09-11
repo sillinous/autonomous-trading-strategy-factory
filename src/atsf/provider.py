@@ -24,14 +24,9 @@ class ProviderMetadata:
 
 
 class MarketDataProvider(Protocol):
-    """Source-neutral contract for normalized historical market data."""
-
     @property
-    def metadata(self) -> ProviderMetadata:
-        """Return immutable provenance for all data emitted by this provider."""
-
-    def load(self, symbol: str, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame:
-        """Return validated OHLCV data for one symbol."""
+    def metadata(self) -> ProviderMetadata: ...
+    def load(self, symbol: str, start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame: ...
 
 
 @dataclass(frozen=True)
@@ -43,21 +38,14 @@ class DataRequest:
     def __post_init__(self) -> None:
         if not self.symbol.strip():
             raise ValueError("symbol is required")
-        if self.start is not None and self.end is not None and self.start >= self.end:
-            raise ValueError("start must be before end")
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError("start must not be after end")
 
 
 class FrameMarketDataProvider:
     """Deterministic provider backed by normalized in-process frames."""
 
-    def __init__(
-        self,
-        frames: dict[str, pd.DataFrame],
-        *,
-        source: str = "frame",
-        timeframe: str = "1d",
-        schema_version: str = "ohlcv.v1",
-    ) -> None:
+    def __init__(self, frames: dict[str, pd.DataFrame], *, source: str = "frame", timeframe: str = "1d", schema_version: str = "ohlcv.v1") -> None:
         if not frames:
             raise ValueError("at least one symbol is required")
         self._frames = {symbol: validate_market_data(frame) for symbol, frame in frames.items()}
@@ -74,7 +62,7 @@ class FrameMarketDataProvider:
         if start is not None:
             frame = frame.loc[frame.index >= start]
         if end is not None:
-            frame = frame.loc[frame.index < end]
+            frame = frame.loc[frame.index <= end]
         if frame.empty:
             raise ValueError("requested market-data range is empty")
         return frame.copy()
