@@ -22,6 +22,7 @@ def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initia
     if any(not isfinite(value) or value <= 0 for value in initial_cash_by_strategy.values()): raise ValueError("strategy cash allocations must be positive and finite")
     if abs(sum(initial_cash_by_strategy.values()) - initial_cash) > tolerance: raise ValueError("strategy cash allocations do not reconcile to initial cash")
     cash = dict(initial_cash_by_strategy); positions = {strategy_id: 0.0 for strategy_id in initial_cash_by_strategy}; previous_timestamp = None
+    fee_mismatches: list[tuple[PortfolioAuditEvent, float]] = []
     for event in events:
         if event.strategy_id not in cash: raise ValueError("audit event references a strategy outside the execution")
         if previous_timestamp is not None and event.timestamp < previous_timestamp: raise ValueError("audit events must be chronological")
@@ -31,21 +32,23 @@ def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initia
         notional = event.quantity * event.price
         if notional <= 0 or not isfinite(notional): raise ValueError("audit fill notional is invalid")
         expected_fee = notional * commission_bps / 10_000.0
+        if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
+            fee_mismatches.append((event, expected_fee))
+            if event.fee == 0 and expected_fee > 0:
+                raise ValueError("audit fill fee does not match execution configuration")
         if event.action == "sell":
             if event.quantity > positions[event.strategy_id] + tolerance:
                 raise ValueError("audit ledger contains a sell exceeding the strategy position")
-            if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
-                raise ValueError("audit fill fee does not match execution configuration")
             cash[event.strategy_id] += notional - event.fee
             positions[event.strategy_id] = max(0.0, positions[event.strategy_id] - event.quantity)
         else:
-            if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
-                raise ValueError("audit fill fee does not match execution configuration")
             required = notional + event.fee
             if required > cash[event.strategy_id] + tolerance: raise ValueError("audit ledger contains a buy exceeding available strategy cash")
             cash[event.strategy_id] -= required; positions[event.strategy_id] += event.quantity
     if any(abs(position) > tolerance for position in positions.values()):
         raise ValueError("audit ledger does not end flat")
+    if fee_mismatches:
+        raise ValueError("audit fill fee does not match execution configuration")
     ending_cash = sum(cash.values())
     if abs(ending_cash - final_equity) > tolerance * max(1.0, abs(final_equity)): raise ValueError("audit ledger cash does not reconcile to final equity")
     return LedgerState(ending_cash, positions)
