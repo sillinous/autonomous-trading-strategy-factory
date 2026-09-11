@@ -22,9 +22,9 @@ def frame() -> pd.DataFrame:
     )
 
 
-def test_ingest_and_register_uses_requested_range():
+def test_ingest_and_register_uses_requested_range_and_provider_metadata():
     connection = sqlite3.connect(":memory:")
-    provider = FrameMarketDataProvider({"AAA": frame()})
+    provider = FrameMarketDataProvider({"AAA": frame()}, source="fixture")
     snapshot, record = ingest_and_register(
         provider,
         connection,
@@ -35,12 +35,21 @@ def test_ingest_and_register_uses_requested_range():
     assert snapshot.bundle.rows == 4
     assert record.version == snapshot.bundle.version
     assert record.rows == 4
+    assert record.source == "fixture"
+    connection.close()
+
+
+def test_ingest_and_register_rejects_provenance_override():
+    connection = sqlite3.connect(":memory:")
+    provider = FrameMarketDataProvider({"AAA": frame()}, source="fixture")
+    with pytest.raises(ValueError, match="source assertion"):
+        ingest_and_register(provider, connection, "market", [DataRequest("AAA")], source="spoofed")
     connection.close()
 
 
 def test_ingest_and_register_rejects_duplicate_requests():
     connection = sqlite3.connect(":memory:")
-    provider = FrameMarketDataProvider({"AAA": frame()})
+    provider = FrameMarketDataProvider({"AAA": frame()}, source="fixture")
     with pytest.raises(ValueError, match="unique"):
         ingest_and_register(
             provider,
