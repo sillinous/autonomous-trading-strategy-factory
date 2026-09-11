@@ -30,14 +30,33 @@ class CacheKey:
             "timeframe": self.timeframe,
             "schema_version": self.schema_version,
         }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:32]
+
+
+def frame_fingerprint(frame: pd.DataFrame) -> str:
+    """Return a stable digest of normalized market-data content and schema."""
+    normalized = validate_market_data(frame)
+    payload = {
+        "columns": list(normalized.columns),
+        "dtypes": [str(dtype) for dtype in normalized.dtypes],
+        "index_dtype": str(normalized.index.dtype),
+    }
+    content = pd.util.hash_pandas_object(normalized, index=True).values.tobytes()
+    digest = hashlib.sha256()
+    digest.update(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+    digest.update(content)
+    return digest.hexdigest()
 
 
 class MarketDataCache:
-    """Filesystem cache for validated provider responses.
+    """Filesystem cache for validated, tamper-evident provider responses.
 
-    Cached frames remain immutable inputs: every read is validated and returned as
-    a copy, preventing accidental mutation of the reproducibility boundary.
+    Cached frames remain immutable inputs: every read is validated, fingerprinted,
+    and returned as a copy. A missing or invalid manifest is a cache miss, causing
+    the provider to refresh the response rather than trusting potentially stale or
+    modified bytes.
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -45,19 +64,44 @@ class MarketDataCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, key: CacheKey) -> Path:
-        safe_symbol = key.symbol.replace("/", "_").replace("\\", "_")
+        safe_symbol = "".join(character if character.isalnum() or character in "-_" else "_" for character in key.symbol)
         return self.root / f"{safe_symbol}-{key.value}.csv"
+
+    def manifest_path_for(self, key: CacheKey) -> Path:
+        return self.path_for(key).with_suffix(".json")
 
     def get(self, key: CacheKey) -> pd.DataFrame | None:
         path = self.path_for(key)
-        if not path.exists():
+        manifest_path = self.manifest_path_for(key)
+        if not path.exists() or not manifest_path.exists():
             return None
-        return validate_market_data(pd.read_csv(path, index_col=0, parse_dates=True)).copy()
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("cache_key") != key.value:
+                return None
+            restored = validate_market_data(pd.read_csv(path, index_col=0, parse_dates=True))
+            if frame_fingerprint(restored) != manifest.get("frame_fingerprint"):
+                return None
+            return restored.copy()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None
 
     def put(self, key: CacheKey, frame: pd.DataFrame) -> Path:
         normalized = validate_market_data(frame)
         path = self.path_for(key)
+        manifest_path = self.manifest_path_for(key)
         temp = path.with_suffix(".tmp")
+        manifest_temp = manifest_path.with_suffix(".tmp")
+        fingerprint = frame_fingerprint(normalized)
         normalized.to_csv(temp)
+        manifest = {
+            "cache_key": key.value,
+            "frame_fingerprint": fingerprint,
+            "rows": len(normalized),
+        }
+        manifest_temp.write_text(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+        )
         temp.replace(path)
+        manifest_temp.replace(manifest_path)
         return path
