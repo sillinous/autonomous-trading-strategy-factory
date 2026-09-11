@@ -16,7 +16,7 @@ class ReplayVerification:
 
 
 def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> ReplayVerification:
-    """Validate a persisted paper-run ledger without executing any orders."""
+    """Validate a persisted paper-run ledger against its stored manifest commitment."""
     run = store.get_portfolio_run(run_id)
     if run is None:
         raise ValueError(f"unknown portfolio run: {run_id}")
@@ -33,7 +33,15 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> Re
         for row in run["audit_events"]
     )
     try:
-        manifest = execution_manifest(events)
+        actual = execution_manifest(events)
     except ValueError as exc:
         return ReplayVerification(run_id, False, ExecutionManifest(0, ""), str(exc))
-    return ReplayVerification(run_id, True, manifest)
+    provenance = run.get("provenance") or {}
+    config = provenance.get("execution_config") or {}
+    stored_fingerprint = config.get("ledger_fingerprint")
+    stored_count = config.get("ledger_event_count")
+    if not isinstance(stored_fingerprint, str) or not stored_fingerprint:
+        return ReplayVerification(run_id, False, actual, "stored execution is missing a ledger fingerprint commitment")
+    if stored_count != actual.event_count or stored_fingerprint != actual.ledger_fingerprint:
+        return ReplayVerification(run_id, False, actual, "persisted execution ledger fingerprint mismatch")
+    return ReplayVerification(run_id, True, actual)
