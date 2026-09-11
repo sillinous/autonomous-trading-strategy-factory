@@ -30,12 +30,24 @@ def test_replacement_research_generates_typed_successors_with_lineage():
     store = ResearchRequestStore(registry)
     original = request()
     store.save(original)
-    result = generate_replacements(original, ["TEST"], generator=StrategyGenerator(), request_store=store)
+    result = generate_replacements(
+        original,
+        ["TEST"],
+        generator=StrategyGenerator(),
+        request_store=store,
+        registry=registry,
+    )
     assert len(result.candidates) == 3
+    assert len(result.strategy_ids) == 3
     assert all(candidate.request_id == original.request_id for candidate in result.candidates)
     assert all(candidate.parent_strategy_id == original.source_strategy_id for candidate in result.candidates)
     assert len({candidate.candidate_id for candidate in result.candidates}) == 3
     assert all(candidate.strategy.universe == ["TEST"] for candidate in result.candidates)
+    for strategy_identifier in result.strategy_ids:
+        lineage = registry.get_lineage(strategy_identifier)
+        assert lineage is not None
+        assert lineage.parent_ids == (original.source_strategy_id,)
+        assert lineage.generation == 1
     registry.close()
 
 
