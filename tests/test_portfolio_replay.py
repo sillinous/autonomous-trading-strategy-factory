@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from atsf.portfolio_executor import execute_persisted_portfolio
@@ -14,12 +16,12 @@ def execute(registry: ExperimentRegistry):
         {first: make_data(), second: make_data()},
         dataset_version=dataset_version,
     )
-    return result, dataset_version, bundle_version
+    return result, dataset_version, bundle_version, first, second
 
 
 def test_persisted_execution_replay_verifies_identity_and_ledger_commitments() -> None:
     registry = ExperimentRegistry()
-    result, _dataset_version, _bundle_version = execute(registry)
+    result, _dataset_version, _bundle_version, _first, _second = execute(registry)
 
     verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
 
@@ -31,7 +33,7 @@ def test_persisted_execution_replay_verifies_identity_and_ledger_commitments() -
 
 def test_persisted_execution_replay_fails_closed_when_ledger_is_tampered() -> None:
     registry = ExperimentRegistry()
-    result, _dataset_version, _bundle_version = execute(registry)
+    result, _dataset_version, _bundle_version, _first, _second = execute(registry)
     registry._connection.execute(
         "UPDATE portfolio_audit_events SET price = price + 1 WHERE run_id = ? AND sequence = 0",
         (result.identity.run_id,),
@@ -47,7 +49,7 @@ def test_persisted_execution_replay_fails_closed_when_ledger_is_tampered() -> No
 
 def test_replay_fails_closed_when_execution_config_is_tampered() -> None:
     registry = ExperimentRegistry()
-    result, _dataset_version, _bundle_version = execute(registry)
+    result, _dataset_version, _bundle_version, _first, _second = execute(registry)
     registry._connection.execute(
         "UPDATE portfolio_run_provenance SET execution_config_json = REPLACE(execution_config_json, '1.0', '2.0') WHERE run_id = ?",
         (result.identity.run_id,),
@@ -63,7 +65,7 @@ def test_replay_fails_closed_when_execution_config_is_tampered() -> None:
 
 def test_replay_fails_closed_when_bundle_commitment_is_tampered() -> None:
     registry = ExperimentRegistry()
-    result, _dataset_version, _bundle_version = execute(registry)
+    result, _dataset_version, _bundle_version, _first, _second = execute(registry)
     registry._connection.execute(
         "UPDATE portfolio_run_provenance SET data_bundle_version = 'tampered' WHERE run_id = ?",
         (result.identity.run_id,),
@@ -79,7 +81,7 @@ def test_replay_fails_closed_when_bundle_commitment_is_tampered() -> None:
 
 def test_replay_fails_closed_when_final_equity_is_tampered() -> None:
     registry = ExperimentRegistry()
-    result, _dataset_version, _bundle_version = execute(registry)
+    result, _dataset_version, _bundle_version, _first, _second = execute(registry)
     registry._connection.execute(
         "UPDATE portfolio_runs SET final_equity = final_equity + 1 WHERE run_id = ?",
         (result.identity.run_id,),
@@ -91,6 +93,60 @@ def test_replay_fails_closed_when_final_equity_is_tampered() -> None:
     assert verification.valid is False
     assert verification.reason is not None
     assert "accounting mismatch" in verification.reason
+    registry.close()
+
+
+def test_replay_rejects_tampered_decision_id_with_signal_replay() -> None:
+    registry = ExperimentRegistry()
+    result, dataset_version, _bundle_version, first, second = execute(registry)
+    row = registry._connection.execute(
+        "SELECT execution_config_json FROM portfolio_run_provenance WHERE run_id = ?",
+        (result.identity.run_id,),
+    ).fetchone()
+    config = json.loads(row[0])
+    config["fill_lineage"][0]["decision_id"] = "0000000000000000"
+    registry._connection.execute(
+        "UPDATE portfolio_run_provenance SET execution_config_json = ? WHERE run_id = ?",
+        (json.dumps(config, sort_keys=True, separators=(",", ":")), result.identity.run_id),
+    )
+    registry._connection.commit()
+
+    verification = verify_persisted_portfolio_run(
+        registry,
+        result.identity.run_id,
+        data={first: make_data(), second: make_data()},
+    )
+
+    assert verification.valid is False
+    assert "fill lineage" in verification.reason
+    assert "reproduce" in verification.reason
+    assert dataset_version == "v1"
+    registry.close()
+
+
+def test_replay_rejects_tampered_lineage_reason_with_signal_replay() -> None:
+    registry = ExperimentRegistry()
+    result, _dataset_version, _bundle_version, first, second = execute(registry)
+    row = registry._connection.execute(
+        "SELECT execution_config_json FROM portfolio_run_provenance WHERE run_id = ?",
+        (result.identity.run_id,),
+    ).fetchone()
+    config = json.loads(row[0])
+    config["fill_lineage"][0]["reason"] = "tampered"
+    registry._connection.execute(
+        "UPDATE portfolio_run_provenance SET execution_config_json = ? WHERE run_id = ?",
+        (json.dumps(config, sort_keys=True, separators=(",", ":")), result.identity.run_id),
+    )
+    registry._connection.commit()
+
+    verification = verify_persisted_portfolio_run(
+        registry,
+        result.identity.run_id,
+        data={first: make_data(), second: make_data()},
+    )
+
+    assert verification.valid is False
+    assert "fill lineage" in verification.reason
     registry.close()
 
 
