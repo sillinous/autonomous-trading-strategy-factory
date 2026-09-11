@@ -15,6 +15,7 @@ from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
 from .registry import ExperimentRegistry
 from .research import run_research
+from .reproducibility import build_reproducibility_certificate
 from .strategy import StrategySpec
 
 
@@ -148,6 +149,28 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "event_count": verification.manifest.event_count,
             "ledger_fingerprint": verification.manifest.ledger_fingerprint,
         }
+
+    @app.post("/runs/{run_id}/certificate")
+    def certificate(run_id: str, request: ReplayVerificationRequest, store: Store, _auth: Protected) -> dict:
+        try:
+            frames: dict[str, pd.DataFrame] = {}
+            for strategy_id, bars in request.data.items():
+                frame = pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")
+                frames[strategy_id] = validate_market_data(frame)
+            run = store.get_portfolio_run(run_id)
+            if run is None:
+                raise HTTPException(status_code=404, detail="paper run not found")
+            if run.get("provenance", {}).get("dataset_version") != request.dataset_version:
+                raise HTTPException(status_code=400, detail="dataset_version does not match persisted run")
+            verification = verify_persisted_portfolio_run(store, run_id, data=frames)
+            if not verification.valid:
+                raise HTTPException(status_code=409, detail=verification.reason or "replay verification failed")
+            certificate_result = build_reproducibility_certificate(run, verification)
+        except HTTPException:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return certificate_result.__dict__
 
     @app.post("/research/runs", status_code=201)
     def research_run(request: ResearchRunRequest, store: Store, _auth: Protected) -> dict:
