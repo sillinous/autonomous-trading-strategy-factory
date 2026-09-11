@@ -5,7 +5,12 @@ import json
 from dataclasses import dataclass
 from random import Random
 
-from .generator import mutate_indicator_period, mutate_threshold
+from .generator import (
+    mutate_indicator_period,
+    mutate_position_fraction,
+    mutate_signal_comparator,
+    mutate_threshold,
+)
 from .lineage import LineageRecord
 from .strategy import StrategySpec
 
@@ -19,21 +24,26 @@ class Candidate:
 
 def strategy_id(strategy: StrategySpec) -> str:
     """Return a compact stable identity for the canonical strategy definition."""
-    payload = json.dumps(
-        strategy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-    )
+    payload = json.dumps(strategy.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
-    """Apply one constrained mutation and preserve genealogy."""
-    mutation = rng.choice((mutate_indicator_period, mutate_threshold))
+    """Apply one constrained structural/parameter mutation and preserve genealogy."""
+    operators = (
+        mutate_indicator_period,
+        mutate_threshold,
+        mutate_signal_comparator,
+        mutate_position_fraction,
+    )
+    mutation = rng.choice(operators)
     try:
         strategy = mutation(candidate.strategy, rng)
         operator = mutation.__name__
     except (TypeError, ValueError):
-        strategy = mutate_indicator_period(candidate.strategy, rng)
-        operator = mutate_indicator_period.__name__
+        fallback = mutate_indicator_period
+        strategy = fallback(candidate.strategy, rng)
+        operator = fallback.__name__
     candidate_id = strategy_id(strategy)
     lineage = LineageRecord(
         strategy_id=candidate_id,
