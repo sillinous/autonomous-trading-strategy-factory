@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-
 import pandas as pd
-
 
 @dataclass(frozen=True)
 class DegradationPolicy:
@@ -12,7 +10,6 @@ class DegradationPolicy:
     min_return: float = -0.10
     max_volatility: float = 0.10
     min_observations: int = 20
-
 
 @dataclass(frozen=True)
 class DegradationReport:
@@ -23,6 +20,9 @@ class DegradationReport:
     volatility: float = 0.0
     reasons: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if self.reasons and not self.degraded:
+            object.__setattr__(self, "degraded", True)
 
 def assess_degradation(equity: pd.Series, policy: DegradationPolicy | None = None) -> DegradationReport:
     policy = policy or DegradationPolicy()
@@ -44,7 +44,6 @@ def assess_degradation(equity: pd.Series, policy: DegradationPolicy | None = Non
     if total_return < policy.min_return: reasons.append("minimum return breached")
     if volatility > policy.max_volatility: reasons.append("volatility ceiling breached")
     return DegradationReport(bool(reasons), len(values), total_return, drawdown, volatility, tuple(reasons))
-
 
 def is_finite_report(report: DegradationReport) -> bool:
     return all(math.isfinite(value) for value in (report.total_return, report.max_drawdown, report.volatility))
