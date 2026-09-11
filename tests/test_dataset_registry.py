@@ -6,7 +6,9 @@ from atsf.dataset_bundle import DatasetBundleIdentity
 from atsf.dataset_registry import DatasetRegistry
 
 
-def identity(version: str = "abc123", *, source: str = "unspecified", timeframe: str = "1d") -> DatasetBundleIdentity:
+def identity(
+    version: str = "abc123", *, source: str = "fixture", timeframe: str = "1d"
+) -> DatasetBundleIdentity:
     return DatasetBundleIdentity(
         dataset_id="prices",
         version=version,
@@ -21,7 +23,7 @@ def identity(version: str = "abc123", *, source: str = "unspecified", timeframe:
 
 def test_register_is_idempotent_for_identical_metadata():
     registry = DatasetRegistry(sqlite3.connect(":memory:"))
-    first = registry.register(identity(), source="fixture")
+    first = registry.register(identity())
     second = registry.register(identity(), source="fixture")
     assert first == second
     assert first.source == "fixture"
@@ -32,7 +34,7 @@ def test_register_is_idempotent_for_identical_metadata():
 
 def test_registration_is_immutable():
     registry = DatasetRegistry(sqlite3.connect(":memory:"))
-    registry.register(identity(), source="fixture")
+    registry.register(identity())
     with pytest.raises(ValueError, match="immutable"):
         registry.register(identity(), source="vendor")
 
