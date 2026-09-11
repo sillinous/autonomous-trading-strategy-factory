@@ -68,9 +68,33 @@ def test_provenance_graph_covers_research_to_paper_chain() -> None:
         "replay_verification",
     } <= kinds
     relations = {edge.relation for edge in graph.edges}
-    assert {"parent_of", "tested", "produced_evidence", "evaluated_for", "promoted_to_candidate", "executed_as", "records", "explained_by", "verifies"} <= relations
+    assert {
+        "tested",
+        "produced_evidence",
+        "evaluated_for",
+        "promoted_to_candidate",
+        "executed_as",
+        "records",
+        "explained_by",
+        "verifies",
+    } <= relations
     assert len(graph.fingerprint) == 24
     assert graph == build_research_provenance_graph(registry, run)
+    registry.close()
+
+
+def test_provenance_graph_rejects_lineage_cycles() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    run = registry.get_portfolio_run(result.identity.run_id)
+    strategy_id = run["attribution"][0]["strategy_id"]
+    registry._connection.execute(
+        "UPDATE lineage SET parent_ids_json = ? WHERE strategy_id = ?",
+        (json.dumps([strategy_id]), strategy_id),
+    )
+    registry._connection.commit()
+    with pytest.raises(ValueError, match="lineage cycle"):
+        build_research_provenance_graph(registry, run)
     registry.close()
 
 
