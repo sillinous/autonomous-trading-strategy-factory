@@ -23,8 +23,26 @@ class FeedbackProvenance:
 
 
 def _fingerprint(payload: Any, length: int = 24) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False, default=str).encode("utf-8")
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        default=str,
+    ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:length]
+
+
+def research_request_fingerprint(request: ResearchRequest) -> str:
+    return _fingerprint(
+        {
+            "request_id": request.request_id,
+            "source_strategy_id": request.source_strategy_id,
+            "reason": request.reason,
+            "priority": request.priority,
+            "constraints": request.constraints,
+        }
+    )
 
 
 def build_feedback_provenance(
@@ -36,26 +54,22 @@ def build_feedback_provenance(
 ) -> FeedbackProvenance:
     if not strategy_id:
         raise ValueError("strategy_id cannot be empty")
-    report_fingerprint = _fingerprint({
-        "strategy_id": strategy_id,
-        "observations": report.observations,
-        "total_return": report.total_return,
-        "max_drawdown": report.max_drawdown,
-        "volatility": report.volatility,
-        "reasons": tuple(report.reasons),
-    })
+    report_fingerprint = _fingerprint(
+        {
+            "strategy_id": strategy_id,
+            "observations": report.observations,
+            "total_return": report.total_return,
+            "max_drawdown": report.max_drawdown,
+            "volatility": report.volatility,
+            "reasons": tuple(report.reasons),
+        }
+    )
     request = action.research_request
     research_fingerprint = None
     request_id = None
     if request is not None:
         request_id = request.request_id
-        research_fingerprint = _fingerprint({
-            "request_id": request.request_id,
-            "source_strategy_id": request.source_strategy_id,
-            "reason": request.reason,
-            "priority": request.priority,
-            "constraints": request.constraints,
-        })
+        research_fingerprint = research_request_fingerprint(request)
     payload = {
         "strategy_id": strategy_id,
         "previous_state": previous_state,
