@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from .allocation import AllocationPolicy, PortfolioAllocation, allocate_inverse_volatility
@@ -27,9 +28,13 @@ def build_portfolio(
     if not ranked:
         raise ValueError("ranked candidates cannot be empty")
     ids = [candidate.candidate_id for candidate in ranked]
-    selection = select_diversified_strategies(returns, ids, portfolio_policy)
+    selected_returns = returns.copy()
+    selected_returns = selected_returns.loc[np.isfinite(selected_returns.to_numpy(dtype=float)).all(axis=1)]
+    if selected_returns.empty:
+        raise ValueError("returns contain no finite observations")
+    selection = select_diversified_strategies(selected_returns, ids, portfolio_policy)
     allocation = allocate_inverse_volatility(
-        returns,
+        selected_returns,
         selection.selected,
         allocation_policy,
     )
