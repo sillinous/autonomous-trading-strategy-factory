@@ -63,10 +63,10 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 
 `atsf.alphavantage.AlphaVantageDailyProvider` is the first external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
 
-`atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache and inherits the wrapped provider's metadata. Cache identity includes symbol, requested range, source, timeframe, and schema version; cached frames are revalidated when read. Ingestion accepts optional provenance values only as assertions and rejects mismatches, so callers cannot silently relabel a dataset.
+`atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache and inherits the wrapped provider's metadata. Each cache entry has a manifest containing the cache-key digest and a cryptographic fingerprint of the normalized frame; missing or tampered manifests/frames are treated as cache misses. Ingestion accepts optional provenance values only as assertions and rejects mismatches, so callers cannot silently relabel a dataset.
 
 External data must enter the system through the provider/ingestion boundary and be fingerprinted into a dataset bundle before research or paper execution. This prevents silent changes in source, timeframe, schema, or underlying bars from masquerading as the same dataset.
 
 ## Status
 
-Research-first foundation with deterministic paper execution, a real external historical-data adapter, and a reproducible provider-response cache. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
+Research-first foundation with deterministic paper execution, a real external historical-data adapter, and a reproducible, tamper-evident provider-response cache. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
