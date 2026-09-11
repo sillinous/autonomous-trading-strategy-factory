@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .data import dataset_identity, validate_market_data
@@ -72,32 +73,39 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     def get_store() -> ExperimentRegistry:
         return store
 
+    def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
+        """Require an API key when the service is configured for authenticated operation."""
+        configured_key = os.getenv("ATSF_API_KEY")
+        if configured_key and (x_api_key is None or not secrets.compare_digest(x_api_key, configured_key)):
+            raise HTTPException(status_code=401, detail="invalid or missing API key")
+
     Store = Annotated[ExperimentRegistry, Depends(get_store)]
+    Protected = Annotated[None, Depends(require_api_key)]
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/capabilities")
-    def capabilities() -> ServiceConfig:
+    def capabilities(_auth: Protected) -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
 
     @app.get("/portfolios/{portfolio_id}")
-    def portfolio(portfolio_id: str, store: Store) -> dict:
+    def portfolio(portfolio_id: str, store: Store, _auth: Protected) -> dict:
         result = store.get_portfolio(portfolio_id)
         if result is None:
             raise HTTPException(status_code=404, detail="portfolio not found")
         return result
 
     @app.get("/runs/{run_id}")
-    def run(run_id: str, store: Store) -> dict:
+    def run(run_id: str, store: Store, _auth: Protected) -> dict:
         result = store.get_portfolio_run(run_id)
         if result is None:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
 
     @app.post("/research/runs", status_code=201)
-    def research_run(request: ResearchRunRequest, store: Store) -> dict:
+    def research_run(request: ResearchRunRequest, store: Store, _auth: Protected) -> dict:
         try:
             frame = validate_market_data(
                 pd.DataFrame([bar.model_dump() for bar in request.data]).set_index("timestamp")
@@ -124,7 +132,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         }
 
     @app.post("/portfolios/{portfolio_id}/paper-runs", status_code=201)
-    def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store) -> dict:
+    def paper_run(portfolio_id: str, request: PaperRunRequest, store: Store, _auth: Protected) -> dict:
         try:
             frames: dict[str, pd.DataFrame] = {}
             for strategy_id, bars in request.data.items():
