@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pandas as pd
+
 from .dataset_bundle import bundle_identity
 from .dataset_registry import DatasetRecord, DatasetRegistry
 from .ingestion import MarketDataSnapshot, _provider_contract
@@ -18,7 +20,11 @@ def ingest_and_register(
     timeframe: str | None = None,
     schema_version: str | None = None,
 ) -> tuple[MarketDataSnapshot, DatasetRecord]:
-    """Ingest requested ranges and atomically register provider provenance."""
+    """Ingest requested ranges and atomically register provider provenance.
+
+    Registry requests treat the supplied end timestamp as inclusive while the
+    lower-level provider contract remains start-inclusive/end-exclusive.
+    """
     if not dataset_id.strip():
         raise ValueError("dataset_id cannot be empty")
     if not requests:
@@ -28,9 +34,13 @@ def ingest_and_register(
     provider_source, provider_timeframe, provider_schema = _provider_contract(
         provider, source=source, timeframe=timeframe, schema_version=schema_version
     )
-
+    offset = pd.tseries.frequencies.to_offset(provider_timeframe)
     data = {
-        request.symbol: provider.load(request.symbol, request.start, request.end)
+        request.symbol: provider.load(
+            request.symbol,
+            request.start,
+            request.end + offset if request.end is not None else None,
+        )
         for request in requests
     }
     if any(frame.empty for frame in data.values()):
@@ -44,9 +54,5 @@ def ingest_and_register(
         schema_version=provider_schema,
     )
     record = DatasetRegistry(registry_connection).register(requested_bundle, source=provider_source)
-    snapshot = MarketDataSnapshot(
-        dataset_id=dataset_id,
-        bundle=requested_bundle,
-        data=data,
-    )
+    snapshot = MarketDataSnapshot(dataset_id=dataset_id, bundle=requested_bundle, data=data)
     return snapshot, record
