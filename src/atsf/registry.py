@@ -56,6 +56,12 @@ class ExperimentRegistry:
                 halted INTEGER NOT NULL, halt_reason TEXT,
                 FOREIGN KEY (portfolio_id) REFERENCES portfolios(portfolio_id)
             );
+            CREATE TABLE IF NOT EXISTS portfolio_run_provenance (
+                run_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, dataset_version TEXT NOT NULL,
+                data_bundle_version TEXT NOT NULL, execution_fingerprint TEXT NOT NULL,
+                execution_config_json TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES portfolio_runs(run_id)
+            );
             CREATE TABLE IF NOT EXISTS portfolio_attribution (
                 run_id TEXT NOT NULL, strategy_id TEXT NOT NULL, return_contribution REAL NOT NULL,
                 risk_contribution REAL NOT NULL, PRIMARY KEY (run_id, strategy_id),
@@ -179,9 +185,17 @@ class ExperimentRegistry:
         return {"portfolio_id": portfolio_id, "definition": json.loads(row["definition_json"]), "members": {item["strategy_id"]: item["weight"] for item in members}}
 
     def save_portfolio_run(self, run_id: str, portfolio_id: str, final_equity: float, halted: bool,
-                           halt_reason: str | None, attribution: list[dict[str, Any]]) -> None:
+                           halt_reason: str | None, attribution: list[dict[str, Any]], *,
+                           dataset_id: str, dataset_version: str, data_bundle_version: str,
+                           execution_fingerprint: str, execution_config: dict[str, Any]) -> None:
         if not run_id or not math.isfinite(final_equity):
             raise ValueError("run_id and finite final_equity are required")
+        required = ((dataset_id, "dataset_id"), (dataset_version, "dataset_version"),
+                    (data_bundle_version, "data_bundle_version"), (execution_fingerprint, "execution_fingerprint"))
+        for value, label in required:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{label} is required")
+        execution_payload = json.dumps(execution_config, sort_keys=True, allow_nan=False)
         if self._connection.execute("SELECT 1 FROM portfolios WHERE portfolio_id = ?", (portfolio_id,)).fetchone() is None:
             raise ValueError(f"unknown portfolio: {portfolio_id}")
         if self._connection.execute("SELECT 1 FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone() is not None:
@@ -200,6 +214,8 @@ class ExperimentRegistry:
         with self._connection:
             self._connection.execute("INSERT INTO portfolio_runs(run_id, portfolio_id, final_equity, halted, halt_reason) VALUES (?, ?, ?, ?, ?)",
                                      (run_id, portfolio_id, final_equity, int(halted), halt_reason))
+            self._connection.execute("INSERT INTO portfolio_run_provenance(run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json) VALUES (?, ?, ?, ?, ?, ?)",
+                                     (run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_payload))
             self._connection.executemany("INSERT INTO portfolio_attribution(run_id, strategy_id, return_contribution, risk_contribution) VALUES (?, ?, ?, ?)", rows)
 
     def save_portfolio_audit_events(self, run_id: str, events: list[PortfolioAuditEvent]) -> None:
@@ -228,7 +244,13 @@ class ExperimentRegistry:
         row = self._connection.execute("SELECT * FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone()
         if row is None:
             return None
+        provenance = self._connection.execute("SELECT dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json FROM portfolio_run_provenance WHERE run_id = ?", (run_id,)).fetchone()
         attribution = self._connection.execute("SELECT strategy_id, return_contribution, risk_contribution FROM portfolio_attribution WHERE run_id = ? ORDER BY strategy_id", (run_id,)).fetchall()
         audit = self._connection.execute("SELECT event_id, sequence, strategy_id, action, timestamp, quantity, price, fee FROM portfolio_audit_events WHERE run_id = ? ORDER BY sequence", (run_id,)).fetchall()
-        return {"run_id": row["run_id"], "portfolio_id": row["portfolio_id"], "final_equity": row["final_equity"], "halted": bool(row["halted"]),
-                "halt_reason": row["halt_reason"], "attribution": [dict(item) for item in attribution], "audit_events": [dict(item) for item in audit]}
+        result = {"run_id": row["run_id"], "portfolio_id": row["portfolio_id"], "final_equity": row["final_equity"], "halted": bool(row["halted"]),
+                  "halt_reason": row["halt_reason"], "attribution": [dict(item) for item in attribution], "audit_events": [dict(item) for item in audit]}
+        if provenance is not None:
+            result["provenance"] = {"dataset_id": provenance["dataset_id"], "dataset_version": provenance["dataset_version"],
+                                    "data_bundle_version": provenance["data_bundle_version"], "execution_fingerprint": provenance["execution_fingerprint"],
+                                    "execution_config": json.loads(provenance["execution_config_json"])}
+        return result
