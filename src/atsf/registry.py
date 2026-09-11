@@ -184,6 +184,96 @@ class ExperimentRegistry:
         members = self._connection.execute("SELECT strategy_id, weight FROM portfolio_members WHERE portfolio_id = ? ORDER BY rank", (portfolio_id,)).fetchall()
         return {"portfolio_id": portfolio_id, "definition": json.loads(row["definition_json"]), "members": {item["strategy_id"]: item["weight"] for item in members}}
 
+    def _validate_portfolio_run_payload(
+        self,
+        run_id: str,
+        portfolio_id: str,
+        final_equity: float,
+        attribution: list[dict[str, Any]],
+        dataset_id: str,
+        dataset_version: str,
+        data_bundle_version: str,
+        execution_fingerprint: str,
+        execution_config: dict[str, Any],
+        audit_events: list[PortfolioAuditEvent],
+    ) -> tuple[str, list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+        if not run_id or not math.isfinite(final_equity):
+            raise ValueError("run_id and finite final_equity are required")
+        required = ((dataset_id, "dataset_id"), (dataset_version, "dataset_version"),
+                    (data_bundle_version, "data_bundle_version"), (execution_fingerprint, "execution_fingerprint"))
+        for value, label in required:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{label} is required")
+        execution_payload = json.dumps(execution_config, sort_keys=True, allow_nan=False)
+        if self._connection.execute("SELECT 1 FROM portfolios WHERE portfolio_id = ?", (portfolio_id,)).fetchone() is None:
+            raise ValueError(f"unknown portfolio: {portfolio_id}")
+        if self._connection.execute("SELECT 1 FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone() is not None:
+            raise ValueError("portfolio run already exists; execution is immutable")
+        portfolio_members = {row[0] for row in self._connection.execute("SELECT strategy_id FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,)).fetchall()}
+        seen: set[str] = set()
+        attribution_rows: list[tuple[Any, ...]] = []
+        for item in attribution:
+            if not isinstance(item, dict) or "strategy_id" not in item:
+                raise ValueError("attribution items require strategy_id")
+            strategy = str(item["strategy_id"])
+            if strategy not in portfolio_members or strategy in seen:
+                raise ValueError("attribution must contain unique persisted portfolio members")
+            if not all(math.isfinite(float(item[key])) for key in ("return_contribution", "risk_contribution")):
+                raise ValueError("attribution values must be finite")
+            seen.add(strategy)
+            attribution_rows.append((run_id, strategy, float(item["return_contribution"]), float(item["risk_contribution"])))
+        ordered = sorted(audit_events, key=lambda event: event.sequence)
+        if [event.sequence for event in ordered] != list(range(len(ordered))):
+            raise ValueError("audit event sequences must be contiguous from zero")
+        audit_rows: list[tuple[Any, ...]] = []
+        audit_ids: set[str] = set()
+        for event in ordered:
+            event_id = audit_event_id(event)
+            if event_id in audit_ids or event.strategy_id not in portfolio_members:
+                raise ValueError("audit events must be unique and reference persisted portfolio members")
+            audit_ids.add(event_id)
+            audit_rows.append((run_id, event_id, event.sequence, event.strategy_id, event.action, event.timestamp, event.quantity, event.price, event.fee))
+        return execution_payload, attribution_rows, audit_rows
+
+    def save_portfolio_execution(
+        self,
+        run_id: str,
+        portfolio_id: str,
+        final_equity: float,
+        halted: bool,
+        halt_reason: str | None,
+        attribution: list[dict[str, Any]],
+        *,
+        dataset_id: str,
+        dataset_version: str,
+        data_bundle_version: str,
+        execution_fingerprint: str,
+        execution_config: dict[str, Any],
+        audit_events: list[PortfolioAuditEvent],
+    ) -> None:
+        """Persist a complete paper execution as one atomic transaction."""
+        execution_payload, attribution_rows, audit_rows = self._validate_portfolio_run_payload(
+            run_id, portfolio_id, final_equity, attribution, dataset_id, dataset_version,
+            data_bundle_version, execution_fingerprint, execution_config, audit_events,
+        )
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO portfolio_runs(run_id, portfolio_id, final_equity, halted, halt_reason) VALUES (?, ?, ?, ?, ?)",
+                (run_id, portfolio_id, final_equity, int(halted), halt_reason),
+            )
+            self._connection.execute(
+                "INSERT INTO portfolio_run_provenance(run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_payload),
+            )
+            self._connection.executemany(
+                "INSERT INTO portfolio_attribution(run_id, strategy_id, return_contribution, risk_contribution) VALUES (?, ?, ?, ?)",
+                attribution_rows,
+            )
+            self._connection.executemany(
+                "INSERT INTO portfolio_audit_events(run_id, event_id, sequence, strategy_id, action, timestamp, quantity, price, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                audit_rows,
+            )
+
     def save_portfolio_run(self, run_id: str, portfolio_id: str, final_equity: float, halted: bool,
                            halt_reason: str | None, attribution: list[dict[str, Any]], *,
                            dataset_id: str, dataset_version: str, data_bundle_version: str,
