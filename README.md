@@ -26,6 +26,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 9. FastAPI service boundary for research artifacts and paper execution
 10. Source-neutral market-data provider contract
 11. External historical-data adapter with dataset provenance
+12. Deterministic provider-response cache
 
 ## Service
 
@@ -61,8 +62,10 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 
 `atsf.alphavantage.AlphaVantageDailyProvider` is the first external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
 
+`atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache. Cache identity includes symbol, requested range, source, timeframe, and schema version; cached frames are revalidated when read. This makes repeated research runs reuse the exact provider response without weakening dataset provenance.
+
 External data must enter the system through the provider/ingestion boundary and be fingerprinted into a dataset bundle before research or paper execution. This prevents silent changes in source, timeframe, schema, or underlying bars from masquerading as the same dataset.
 
 ## Status
 
-Research-first foundation with deterministic paper execution and the first real external historical-data adapter. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
+Research-first foundation with deterministic paper execution, a real external historical-data adapter, and a reproducible provider-response cache. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
