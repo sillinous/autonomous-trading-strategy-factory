@@ -33,25 +33,13 @@ def transport(_: str) -> bytes:
 def test_real_provider_contract_flows_into_fingerprinted_registry() -> None:
     provider = AlphaVantageDailyProvider("key", transport=transport)
     requests = [DataRequest("TEST")]
-    snapshot = ingest_requests(
-        provider,
-        "market",
-        requests,
-        source=provider.source,
-        timeframe=provider.timeframe,
-        schema_version=provider.schema_version,
-    )
+    snapshot = ingest_requests(provider, "market", requests)
     connection = sqlite3.connect(":memory:")
-    registered, record = ingest_and_register(
-        provider,
-        connection,
-        "market",
-        requests,
-        source=provider.source,
-        timeframe=provider.timeframe,
-        schema_version=provider.schema_version,
-    )
+    registered, record = ingest_and_register(provider, connection, "market", requests)
 
+    assert provider.metadata.source == "alphavantage"
+    assert provider.metadata.timeframe == "1d"
+    assert provider.metadata.schema_version == "ohlcv.v1"
     assert snapshot.bundle.version == registered.bundle.version
     assert record.version == registered.bundle.version
     assert record.source == "alphavantage"
