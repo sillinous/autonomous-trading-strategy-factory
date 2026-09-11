@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pandas as pd
+
+from .dataset_bundle import bundle_identity
+from .execution_lineage import FillLineage, verify_fill_lineage
 from .execution_manifest import ExecutionManifest, execution_manifest
 from .ledger_replay import validate_execution_ledger
 from .portfolio_audit import PortfolioAuditEvent
 from .portfolio_run import build_portfolio_run_identity
 from .registry import ExperimentRegistry
+from .signals import strategy_signals
 
 
 @dataclass(frozen=True)
@@ -21,8 +26,33 @@ def _failure(run_id: str, reason: str, manifest: ExecutionManifest | None = None
     return ReplayVerification(run_id, False, manifest or ExecutionManifest(0, ""), reason)
 
 
-def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> ReplayVerification:
-    """Independently verify a persisted paper run's identity, provenance, and ledger accounting."""
+def _stored_lineage(config: dict, run_id: str, manifest: ExecutionManifest) -> tuple[FillLineage, ...] | ReplayVerification:
+    raw = config.get("fill_lineage")
+    if not isinstance(raw, list) or len(raw) != manifest.event_count:
+        return _failure(run_id, "stored execution is missing a complete fill lineage", manifest)
+    lineage: list[FillLineage] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != {"event_id", "decision_id", "reason"}:
+            return _failure(run_id, "stored fill lineage has an invalid record", manifest)
+        event_id = item["event_id"]
+        decision = item["decision_id"]
+        reason = item["reason"]
+        if not all(isinstance(value, str) and value for value in (event_id, decision, reason)):
+            return _failure(run_id, "stored fill lineage contains invalid identifiers", manifest)
+        if event_id in seen:
+            return _failure(run_id, "stored fill lineage contains duplicate event IDs", manifest)
+        seen.add(event_id)
+        lineage.append(FillLineage(event_id, decision, reason))
+    return tuple(lineage)
+
+
+def verify_persisted_portfolio_run(
+    store: ExperimentRegistry,
+    run_id: str,
+    data: dict[str, pd.DataFrame] | None = None,
+) -> ReplayVerification:
+    """Verify persisted identity, provenance, accounting, and optionally signal replay."""
     run = store.get_portfolio_run(run_id)
     if run is None:
         raise ValueError(f"unknown portfolio run: {run_id}")
@@ -49,7 +79,7 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> Re
     try:
         identity_config = {
             key: value for key, value in config.items()
-            if key not in {"ledger_fingerprint", "ledger_event_count"}
+            if key not in {"ledger_fingerprint", "ledger_event_count", "fill_lineage"}
         }
         expected = build_portfolio_run_identity(
             str(run["portfolio_id"]),
@@ -92,6 +122,14 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> Re
     if stored_count != actual.event_count or stored_fingerprint != actual.ledger_fingerprint:
         return _failure(run_id, "persisted execution ledger fingerprint mismatch", actual)
 
+    lineage = _stored_lineage(config, run_id, actual)
+    if isinstance(lineage, ReplayVerification):
+        return lineage
+    expected_event_ids = tuple(item.event_id for item in lineage)
+    actual_event_ids = tuple(__import__("atsf.portfolio_audit", fromlist=["audit_event_id"]).audit_event_id(event) for event in sorted(events, key=lambda item: item.sequence))
+    if expected_event_ids != actual_event_ids:
+        return _failure(run_id, "stored fill lineage event IDs do not match the audit ledger", actual)
+
     if provenance.get("dataset_id") != portfolio["definition"].get("dataset_id"):
         return _failure(run_id, "run dataset_id does not match persisted portfolio")
     if stored_dataset_version != portfolio["definition"].get("dataset_version"):
@@ -113,5 +151,41 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> Re
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _failure(run_id, f"execution ledger accounting mismatch: {exc}", actual)
+
+    if data is not None:
+        if set(data) != set(weights):
+            return _failure(run_id, "replay market data members do not match persisted portfolio", actual)
+        dataset = store.require_dataset(str(portfolio["definition"]["dataset_id"]), stored_dataset_version)
+        try:
+            bundle = bundle_identity(
+                data,
+                str(portfolio["definition"]["dataset_id"]),
+                source=dataset.source,
+                timeframe=dataset.timeframe,
+                schema_version=dataset.schema_version,
+            )
+        except (TypeError, ValueError) as exc:
+            return _failure(run_id, f"replay market data is invalid: {exc}", actual)
+        if bundle.version != stored_bundle_version:
+            return _failure(run_id, "replay market data does not match persisted data bundle", actual)
+        strategies = {}
+        for strategy_id in weights:
+            strategy = store.get_strategy(strategy_id)
+            if strategy is None:
+                return _failure(run_id, f"persisted strategy is missing: {strategy_id}", actual)
+            strategies[strategy_id] = strategy
+        try:
+            signals = {strategy_id: strategy_signals(data[strategy_id], strategy) for strategy_id, strategy in strategies.items()}
+            liquidation_timestamp = pd.Timestamp(events[-1].timestamp) if bool(run["halted"]) and events else None
+            if not verify_fill_lineage(
+                tuple(sorted(events, key=lambda item: item.sequence)),
+                lineage,
+                signals,
+                halted=bool(run["halted"]),
+                liquidation_timestamp=liquidation_timestamp,
+            ):
+                return _failure(run_id, "persisted fill lineage does not reproduce from stored strategies and market data", actual)
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            return _failure(run_id, f"signal replay failed: {exc}", actual)
 
     return ReplayVerification(run_id, True, actual)
