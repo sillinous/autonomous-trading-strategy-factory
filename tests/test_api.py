@@ -60,7 +60,8 @@ def bars(count: int = 4) -> list[dict]:
     ]
 
 
-def test_health_and_capabilities_are_paper_only():
+def test_health_and_capabilities_are_paper_only(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     client = TestClient(create_app(registry))
     assert client.get("/health").json() == {"status": "ok"}
@@ -68,7 +69,19 @@ def test_health_and_capabilities_are_paper_only():
     registry.close()
 
 
-def test_research_run_endpoint_persists_research_artifacts():
+def test_configured_api_key_protects_operational_endpoints(monkeypatch):
+    monkeypatch.setenv("ATSF_API_KEY", "test-secret")
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    assert client.get("/health").status_code == 200
+    assert client.get("/capabilities").status_code == 401
+    assert client.get("/capabilities", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert client.get("/capabilities", headers={"X-API-Key": "test-secret"}).status_code == 200
+    registry.close()
+
+
+def test_research_run_endpoint_persists_research_artifacts(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     client = TestClient(create_app(registry))
     response = client.post(
@@ -92,7 +105,8 @@ def test_research_run_endpoint_persists_research_artifacts():
     registry.close()
 
 
-def test_paper_run_endpoint_executes_persisted_portfolio():
+def test_paper_run_endpoint_executes_persisted_portfolio(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     strategy_id = seed(registry)
     client = TestClient(create_app(registry))
@@ -110,7 +124,8 @@ def test_paper_run_endpoint_executes_persisted_portfolio():
     registry.close()
 
 
-def test_paper_run_endpoint_rejects_unknown_portfolio_with_not_found():
+def test_paper_run_endpoint_rejects_unknown_portfolio_with_not_found(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     client = TestClient(create_app(registry))
     response = client.post(
@@ -122,7 +137,8 @@ def test_paper_run_endpoint_rejects_unknown_portfolio_with_not_found():
     registry.close()
 
 
-def test_paper_run_endpoint_rejects_invalid_market_data_with_bad_request():
+def test_paper_run_endpoint_rejects_invalid_market_data_with_bad_request(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
     strategy_id = seed(registry)
     client = TestClient(create_app(registry))
