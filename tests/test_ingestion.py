@@ -22,14 +22,11 @@ def frame(offset: float = 0.0) -> pd.DataFrame:
     )
 
 
-def test_ingest_returns_validated_fingerprinted_snapshot():
-    snapshot = ingest(
-        FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)}),
-        "market",
-        ["BBB", "AAA"],
-        source="fixture",
-        timeframe="1d",
+def test_ingest_returns_provider_fingerprinted_snapshot():
+    provider = FrameMarketDataProvider(
+        {"AAA": frame(), "BBB": frame(10)}, source="fixture", timeframe="1d"
     )
+    snapshot = ingest(provider, "market", ["BBB", "AAA"])
     assert snapshot.dataset_id == "market"
     assert snapshot.bundle.symbols == ("AAA", "BBB")
     assert snapshot.bundle.rows == 10
@@ -37,6 +34,19 @@ def test_ingest_returns_validated_fingerprinted_snapshot():
     assert snapshot.bundle.timeframe == "1d"
     assert snapshot.bundle.schema_version == "ohlcv.v1"
     assert set(snapshot.data) == {"AAA", "BBB"}
+
+
+def test_ingest_contract_arguments_are_assertions_only():
+    provider = FrameMarketDataProvider({"AAA": frame()}, source="fixture", timeframe="1d")
+    snapshot = ingest(provider, "market", ["AAA"], source="fixture", timeframe="1d")
+    assert snapshot.bundle.source == "fixture"
+
+    with pytest.raises(ValueError, match="source assertion"):
+        ingest(provider, "market", ["AAA"], source="spoofed")
+    with pytest.raises(ValueError, match="timeframe assertion"):
+        ingest(provider, "market", ["AAA"], timeframe="1h")
+    with pytest.raises(ValueError, match="schema_version assertion"):
+        ingest(provider, "market", ["AAA"], schema_version="spoofed.v1")
 
 
 def test_ingest_range_is_part_of_the_snapshot():
@@ -54,7 +64,9 @@ def test_ingest_rejects_duplicate_symbols():
 
 
 def test_ingest_and_register_fingerprints_exact_requested_ranges():
-    provider = FrameMarketDataProvider({"AAA": frame(), "BBB": frame(10)})
+    provider = FrameMarketDataProvider(
+        {"AAA": frame(), "BBB": frame(10)}, source="fixture", timeframe="1d"
+    )
     registry = ExperimentRegistry()
     requests = [
         DataRequest("AAA", pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-05")),
