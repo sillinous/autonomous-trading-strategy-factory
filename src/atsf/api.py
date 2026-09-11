@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from .data import dataset_identity, validate_market_data
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
+from .provenance_graph import build_research_provenance_graph
 from .registry import ExperimentRegistry
 from .research import run_research
 from .reproducibility import build_reproducibility_certificate
@@ -110,6 +111,38 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
+
+    @app.get("/runs/{run_id}/provenance-graph")
+    def provenance_graph(run_id: str, store: Store, _auth: Protected) -> dict:
+        run = store.get_portfolio_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="paper run not found")
+        try:
+            graph = build_research_provenance_graph(store, run)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "run_id": run_id,
+            "schema_version": graph.schema_version,
+            "fingerprint": graph.fingerprint,
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "kind": node.kind,
+                    "key": node.key,
+                    "attributes": node.attributes,
+                }
+                for node in graph.nodes
+            ],
+            "edges": [
+                {
+                    "source": edge.source,
+                    "target": edge.target,
+                    "relation": edge.relation,
+                }
+                for edge in graph.edges
+            ],
+        }
 
     @app.get("/runs/{run_id}/verify")
     def verify_run(run_id: str, store: Store, _auth: Protected) -> dict:
