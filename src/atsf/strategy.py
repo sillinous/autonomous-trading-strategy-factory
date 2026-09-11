@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 IndicatorKind = Literal["sma", "ema", "rsi"]
 
 
@@ -33,20 +32,25 @@ class Indicator(BaseModel):
     period: int | None = Field(default=None, gt=0)
     parameters: dict[str, float | int | str] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_kind(cls, values: object) -> object:
+        if isinstance(values, dict) and values.get("kind") is None:
+            name = values.get("name")
+            if name in {"sma", "ema", "rsi"}:
+                values = dict(values)
+                values["kind"] = name
+        return values
+
     @model_validator(mode="after")
-    def normalize_kind(self) -> Indicator:
-        # Preserve the original compact DSL form: Indicator(name="sma", period=20).
-        # New generated strategies use an explicit kind plus a semantic name.
+    def validate_kind(self) -> Indicator:
         if self.kind is None:
-            if self.name not in {"sma", "ema", "rsi"}:
-                raise ValueError("indicator kind is required when name is not a built-in indicator name")
-            return self.model_copy(update={"kind": self.name})
+            raise ValueError("indicator kind is required when name is not a built-in indicator name")
         return self
 
 
 class Condition(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     left: str = Field(min_length=1)
     comparator: Comparator
     right: float | int | str
@@ -54,7 +58,6 @@ class Condition(BaseModel):
 
 class Signal(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     all: list[Condition] = Field(default_factory=list)
     any: list[Condition] = Field(default_factory=list)
 
@@ -67,7 +70,6 @@ class Signal(BaseModel):
 
 class PositionSizing(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     method: Literal["fixed_fraction", "equal_weight", "volatility_target"]
     value: float = Field(gt=0)
     max_position: float = Field(default=1.0, gt=0, le=1)
@@ -75,7 +77,6 @@ class PositionSizing(BaseModel):
 
 class RiskLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     max_leverage: float = Field(default=1.0, gt=0)
     max_position: float = Field(default=1.0, gt=0, le=1)
     stop_loss: float | None = Field(default=None, gt=0, lt=1)
@@ -84,9 +85,7 @@ class RiskLimits(BaseModel):
 
 class StrategySpec(BaseModel):
     """Serializable, execution-neutral strategy definition."""
-
     model_config = ConfigDict(extra="forbid")
-
     name: str = Field(min_length=1)
     version: int = Field(default=1, ge=1)
     universe: list[str] = Field(min_length=1)

@@ -50,18 +50,15 @@ class DatasetRegistry:
             )
         self._connection.commit()
 
-    def register(
-        self,
-        identity: DatasetBundleIdentity,
-        *,
-        source: str | None = None,
-    ) -> DatasetRecord:
-        """Register identity metadata; ``source`` is an assertion, never an override."""
+    def register(self, identity: DatasetBundleIdentity, *, source: str | None = None) -> DatasetRecord:
+        """Register identity metadata; an unspecified identity source may be asserted by the caller."""
         if identity.rows <= 0:
             raise ValueError("dataset must contain rows")
-        if source is not None and source.strip() != identity.source:
+        identity_source = identity.source.strip()
+        asserted_source = source.strip() if source is not None else None
+        if asserted_source and identity_source not in {"", "unspecified"} and asserted_source != identity_source:
             raise ValueError("dataset source does not match its identity")
-        normalized_source = identity.source.strip()
+        normalized_source = asserted_source or identity_source
         if not normalized_source:
             raise ValueError("dataset identity source is required")
         record = DatasetRecord(
@@ -86,17 +83,8 @@ class DatasetRegistry:
                 (dataset_id, version, symbols_json, rows, start, end, source, timeframe, schema_version)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                record.dataset_id,
-                record.version,
-                json.dumps(record.symbols, separators=(",", ":")),
-                record.rows,
-                record.start,
-                record.end,
-                record.source,
-                record.timeframe,
-                record.schema_version,
-            ),
+            (record.dataset_id, record.version, json.dumps(record.symbols, separators=(",", ":")),
+             record.rows, record.start, record.end, record.source, record.timeframe, record.schema_version),
         )
         self._connection.commit()
         return record
@@ -105,24 +93,12 @@ class DatasetRegistry:
         row = self._connection.execute(
             """
             SELECT dataset_id, version, symbols_json, rows, start, end, source, timeframe, schema_version
-            FROM datasets
-            WHERE dataset_id = ? AND version = ?
-            """,
-            (dataset_id, version),
+            FROM datasets WHERE dataset_id = ? AND version = ?
+            """, (dataset_id, version),
         ).fetchone()
         if row is None:
             return None
-        return DatasetRecord(
-            dataset_id=row[0],
-            version=row[1],
-            symbols=tuple(json.loads(row[2])),
-            rows=row[3],
-            start=row[4],
-            end=row[5],
-            source=row[6],
-            timeframe=row[7],
-            schema_version=row[8],
-        )
+        return DatasetRecord(row[0], row[1], tuple(json.loads(row[2])), row[3], row[4], row[5], row[6], row[7], row[8])
 
     def require(self, dataset_id: str, version: str) -> DatasetRecord:
         record = self.get(dataset_id, version)

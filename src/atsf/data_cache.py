@@ -22,27 +22,16 @@ class CacheKey:
 
     @property
     def value(self) -> str:
-        payload = {
-            "symbol": self.symbol,
-            "start": self.start.isoformat() if self.start else None,
-            "end": self.end.isoformat() if self.end else None,
-            "source": self.source,
-            "timeframe": self.timeframe,
-            "schema_version": self.schema_version,
-        }
-        return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()[:32]
+        payload = {"symbol": self.symbol, "start": self.start.isoformat() if self.start else None,
+                   "end": self.end.isoformat() if self.end else None, "source": self.source,
+                   "timeframe": self.timeframe, "schema_version": self.schema_version}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
 
 
 def frame_fingerprint(frame: pd.DataFrame) -> str:
-    """Return a stable digest of normalized market-data content and schema."""
     normalized = validate_market_data(frame)
-    payload = {
-        "columns": list(normalized.columns),
-        "dtypes": [str(dtype) for dtype in normalized.dtypes],
-        "index_dtype": str(normalized.index.dtype),
-    }
+    payload = {"columns": list(normalized.columns), "dtypes": [str(dtype) for dtype in normalized.dtypes],
+               "index_dtype": str(normalized.index.dtype)}
     content = pd.util.hash_pandas_object(normalized, index=True).values.tobytes()
     digest = hashlib.sha256()
     digest.update(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
@@ -51,20 +40,14 @@ def frame_fingerprint(frame: pd.DataFrame) -> str:
 
 
 class MarketDataCache:
-    """Filesystem cache for validated, tamper-evident provider responses.
-
-    Cached frames remain immutable inputs: every read is validated, fingerprinted,
-    and returned as a copy. A missing or invalid manifest is a cache miss, causing
-    the provider to refresh the response rather than trusting potentially stale or
-    modified bytes.
-    """
+    """Filesystem cache for validated, tamper-evident provider responses."""
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, key: CacheKey) -> Path:
-        safe_symbol = "".join(character if character.isalnum() or character in "-_" else "_" for character in key.symbol)
+        safe_symbol = "".join(c if c.isalnum() or c in "-_" else "_" for c in key.symbol)
         return self.root / f"{safe_symbol}-{key.value}.csv"
 
     def manifest_path_for(self, key: CacheKey) -> Path:
@@ -90,18 +73,12 @@ class MarketDataCache:
         normalized = validate_market_data(frame)
         path = self.path_for(key)
         manifest_path = self.manifest_path_for(key)
-        temp = path.with_suffix(".tmp")
-        manifest_temp = manifest_path.with_suffix(".tmp")
+        temp = path.with_suffix(".data.tmp")
+        manifest_temp = manifest_path.with_suffix(".manifest.tmp")
         fingerprint = frame_fingerprint(normalized)
         normalized.to_csv(temp)
-        manifest = {
-            "cache_key": key.value,
-            "frame_fingerprint": fingerprint,
-            "rows": len(normalized),
-        }
-        manifest_temp.write_text(
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
-        )
+        manifest = {"cache_key": key.value, "frame_fingerprint": fingerprint, "rows": len(normalized)}
+        manifest_temp.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         temp.replace(path)
         manifest_temp.replace(manifest_path)
         return path
