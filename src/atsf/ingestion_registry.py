@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .dataset_bundle import bundle_identity
+from .dataset_bundle import DATA_SCHEMA_VERSION, bundle_identity
 from .dataset_registry import DatasetRecord, DatasetRegistry
 from .ingestion import MarketDataSnapshot
 from .provider import DataRequest, MarketDataProvider
@@ -15,6 +15,8 @@ def ingest_and_register(
     requests: list[DataRequest],
     *,
     source: str,
+    timeframe: str = "1d",
+    schema_version: str = DATA_SCHEMA_VERSION,
 ) -> tuple[MarketDataSnapshot, DatasetRecord]:
     """Ingest requested ranges once and atomically register their fingerprint."""
     if not requests:
@@ -29,7 +31,13 @@ def ingest_and_register(
     if any(frame.empty for frame in data.values()):
         raise ValueError("requested market-data range is empty")
 
-    requested_bundle = bundle_identity(data, dataset_id)
+    requested_bundle = bundle_identity(
+        data,
+        dataset_id,
+        source=source,
+        timeframe=timeframe,
+        schema_version=schema_version,
+    )
     record = DatasetRegistry(registry_connection).register(requested_bundle, source=source)
     snapshot = MarketDataSnapshot(
         dataset_id=dataset_id,
