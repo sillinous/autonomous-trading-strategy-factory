@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .execution_manifest import ExecutionManifest, execution_manifest
+from .ledger_replay import validate_execution_ledger
 from .portfolio_audit import PortfolioAuditEvent
 from .portfolio_run import build_portfolio_run_identity
 from .registry import ExperimentRegistry
@@ -21,7 +22,7 @@ def _failure(run_id: str, reason: str, manifest: ExecutionManifest | None = None
 
 
 def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> ReplayVerification:
-    """Independently verify a persisted paper run's identity, provenance, and ledger commitment."""
+    """Independently verify a persisted paper run's identity, provenance, and ledger accounting."""
     run = store.get_portfolio_run(run_id)
     if run is None:
         raise ValueError(f"unknown portfolio run: {run_id}")
@@ -97,5 +98,20 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str) -> Re
         return _failure(run_id, "run dataset_version does not match persisted portfolio")
     if stored_bundle_version != portfolio["definition"].get("data_bundle_version"):
         return _failure(run_id, "run data_bundle_version does not match persisted portfolio")
+
+    try:
+        initial_cash = float(config["initial_cash"])
+        commission_bps = float(config["commission_bps"])
+        strategy_cash = {strategy_id: initial_cash * float(weight) for strategy_id, weight in weights.items() if float(weight) > 0}
+        reserve = initial_cash - sum(strategy_cash.values())
+        validate_execution_ledger(
+            events,
+            initial_cash_by_strategy=strategy_cash,
+            commission_bps=commission_bps,
+            initial_cash=sum(strategy_cash.values()),
+            final_equity=float(run["final_equity"]) - reserve,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _failure(run_id, f"execution ledger accounting mismatch: {exc}", actual)
 
     return ReplayVerification(run_id, True, actual)
