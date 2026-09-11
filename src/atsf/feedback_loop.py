@@ -6,6 +6,7 @@ from hashlib import sha256
 from .lifecycle import StrategyLifecycle, StrategyState
 from .monitoring import DegradationReport
 from .research_queue import ResearchQueue, ResearchReason, ResearchRequest
+from .research_registry import ResearchRequestStore
 
 
 @dataclass(frozen=True)
@@ -20,8 +21,9 @@ def process_strategy_health(
     lifecycle: StrategyLifecycle,
     report: DegradationReport,
     queue: ResearchQueue,
+    request_store: ResearchRequestStore | None = None,
 ) -> FeedbackAction:
-    """Transition paper health and enqueue deterministic replacement work."""
+    """Transition paper health and persist/enqueue deterministic replacement work."""
     if not strategy_id:
         raise ValueError("strategy_id cannot be empty")
 
@@ -38,5 +40,7 @@ def process_strategy_health(
             priority=0,
             constraints=("avoid_known_failure",),
         )
+        if request_store is not None:
+            request_store.save(request)
         return FeedbackAction(strategy_id, state, queue.enqueue(request))
     return FeedbackAction(strategy_id, state, None)
