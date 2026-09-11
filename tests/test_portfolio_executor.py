@@ -3,6 +3,7 @@ import pytest
 
 from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
+from atsf.lineage import LineageRecord
 from atsf.portfolio_audit import PortfolioAuditEvent
 from atsf.portfolio_executor import execute_persisted_portfolio
 from atsf.registry import ExperimentRegistry
@@ -39,6 +40,8 @@ def make_data(offset: float = 0.0) -> pd.DataFrame:
 def seed_persisted_portfolio(registry: ExperimentRegistry) -> tuple[str, str, str, str]:
     strategies = [make_strategy("one", 3), make_strategy("two", 4)]
     ids = [registry.save_strategy(strategy) for strategy in strategies]
+    for identifier in ids:
+        registry.save_lineage(LineageRecord(strategy_id=identifier, generation=0))
     data = {ids[0]: make_data(), ids[1]: make_data()}
     data_bundle_version = bundle_identity(data, "prices", source="fixture", timeframe="1d").version
     registry.register_dataset(
