@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from atsf.portfolio_executor import execute_persisted_portfolio
@@ -50,7 +49,7 @@ def test_persisted_execution_replay_fails_closed_when_ledger_is_tampered() -> No
 
 def test_persisted_execution_replay_rejects_missing_commitment() -> None:
     registry = ExperimentRegistry()
-    first, _second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
+    _first, _second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
     registry.save_portfolio_run(
         "uncommitted-run",
         "portfolio-1",
