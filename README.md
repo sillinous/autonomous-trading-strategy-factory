@@ -12,6 +12,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 - Live execution is disabled until a strategy passes explicit promotion gates.
 - Persisted portfolios and paper runs are immutable and auditable.
 - Market-data access is provider-neutral; vendor adapters must normalize data through the canonical schema.
+- Provider-declared source, timeframe, and schema metadata are authoritative and cannot be overridden by ingestion callers.
 
 ## Initial scope
 
@@ -58,11 +59,11 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 
 ## Market-data providers
 
-`atsf.provider.MarketDataProvider` defines the vendor-neutral contract. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution.
+`atsf.provider.MarketDataProvider` defines the vendor-neutral contract. Each provider exposes immutable `ProviderMetadata(source, timeframe, schema_version)`, which is the authoritative provenance for data it emits. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution.
 
 `atsf.alphavantage.AlphaVantageDailyProvider` is the first external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
 
-`atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache. Cache identity includes symbol, requested range, source, timeframe, and schema version; cached frames are revalidated when read. This makes repeated research runs reuse the exact provider response without weakening dataset provenance.
+`atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache and inherits the wrapped provider's metadata. Cache identity includes symbol, requested range, source, timeframe, and schema version; cached frames are revalidated when read. Ingestion accepts optional provenance values only as assertions and rejects mismatches, so callers cannot silently relabel a dataset.
 
 External data must enter the system through the provider/ingestion boundary and be fingerprinted into a dataset bundle before research or paper execution. This prevents silent changes in source, timeframe, schema, or underlying bars from masquerading as the same dataset.
 
