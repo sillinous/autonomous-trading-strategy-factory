@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
+from .feedback_registry import FeedbackEventStore
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
 from .provenance_graph import build_research_provenance_graph
@@ -107,6 +108,13 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
+
+    @app.get("/strategies/{strategy_id}/feedback")
+    def strategy_feedback(strategy_id: str, store: Store, _auth: Protected) -> dict:
+        if not strategy_id:
+            raise HTTPException(status_code=400, detail="strategy_id cannot be empty")
+        events = FeedbackEventStore(store).list_for_strategy(strategy_id)
+        return {"strategy_id": strategy_id, "event_count": len(events), "events": events}
 
     @app.get("/runs/{run_id}/provenance-graph")
     def provenance_graph(run_id: str, store: Store, _auth: Protected) -> dict:
