@@ -5,7 +5,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .portfolio_audit import audit_event_id
 from .registry import ExperimentRegistry
 
 PROVENANCE_GRAPH_SCHEMA_VERSION = "1"
@@ -35,11 +34,17 @@ class ResearchProvenanceGraph:
 
 
 def _canonical(payload: Any) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _node_id(kind: str, key: str) -> str:
-    return hashlib.sha256(_canonical({"kind": kind, "key": key}).encode("utf-8")).hexdigest()[:16]
+    payload = {"kind": kind, "key": key}
+    return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()[:16]
 
 
 def _node(kind: str, key: str, attributes: dict[str, Any]) -> ProvenanceNode:
@@ -50,7 +55,10 @@ def _edge(source: ProvenanceNode, target: ProvenanceNode, relation: str) -> Prov
     return ProvenanceEdge(source.node_id, target.node_id, relation)
 
 
-def _lineage_nodes(store: ExperimentRegistry, strategy_ids: set[str]) -> tuple[dict[str, ProvenanceNode], list[ProvenanceEdge]]:
+def _lineage_nodes(
+    store: ExperimentRegistry,
+    strategy_ids: set[str],
+) -> tuple[dict[str, ProvenanceNode], list[ProvenanceEdge]]:
     nodes: dict[str, ProvenanceNode] = {}
     edges: list[ProvenanceEdge] = []
     visiting: set[str] = set()
@@ -69,7 +77,10 @@ def _lineage_nodes(store: ExperimentRegistry, strategy_ids: set[str]) -> tuple[d
         strategy_node = _node(
             "strategy",
             identifier,
-            {"strategy_id": identifier, "definition": strategy.model_dump(mode="json")},
+            {
+                "strategy_id": identifier,
+                "definition": strategy.model_dump(mode="json"),
+            },
         )
         lineage_node = _node(
             "lineage",
@@ -87,8 +98,7 @@ def _lineage_nodes(store: ExperimentRegistry, strategy_ids: set[str]) -> tuple[d
         edges.append(_edge(lineage_node, strategy_node, "defines"))
         for parent_id in lineage.parent_ids:
             visit(parent_id)
-            parent_node = nodes[parent_id]
-            edges.append(_edge(parent_node, strategy_node, "parent_of"))
+            edges.append(_edge(nodes[parent_id], strategy_node, "parent_of"))
         visiting.remove(identifier)
         visited.add(identifier)
 
@@ -97,12 +107,16 @@ def _lineage_nodes(store: ExperimentRegistry, strategy_ids: set[str]) -> tuple[d
     return nodes, edges
 
 
-def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, Any]) -> ResearchProvenanceGraph:
-    """Materialize and validate the complete persisted research-to-paper lineage graph."""
+def build_research_provenance_graph(
+    store: ExperimentRegistry,
+    run: dict[str, Any],
+) -> ResearchProvenanceGraph:
+    """Materialize and validate the persisted research-to-paper lineage graph."""
     run_id = str(run.get("run_id") or "")
     portfolio_id = str(run.get("portfolio_id") or "")
     if not run_id or not portfolio_id:
         raise ValueError("run and portfolio identifiers are required")
+
     portfolio = store.get_portfolio(portfolio_id)
     if portfolio is None:
         raise ValueError("portfolio provenance is missing")
@@ -119,7 +133,13 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
     bundle_version = provenance.get("data_bundle_version")
     execution_fingerprint = provenance.get("execution_fingerprint")
     config = provenance.get("execution_config")
-    if not all(isinstance(value, str) and value for value in (dataset_id, dataset_version, bundle_version, execution_fingerprint)):
+    required_strings = (
+        dataset_id,
+        dataset_version,
+        bundle_version,
+        execution_fingerprint,
+    )
+    if not all(isinstance(value, str) and value for value in required_strings):
         raise ValueError("execution provenance is incomplete")
     if not isinstance(config, dict):
         raise ValueError("execution configuration is invalid")
@@ -140,7 +160,15 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             "execution_fingerprint": execution_fingerprint,
         },
     )
-    portfolio_node = _node("portfolio", portfolio_id, {"portfolio_id": portfolio_id, "definition": definition, "members": members})
+    portfolio_node = _node(
+        "portfolio",
+        portfolio_id,
+        {
+            "portfolio_id": portfolio_id,
+            "definition": definition,
+            "members": members,
+        },
+    )
     dataset_node = _node(
         "dataset",
         f"{dataset_id}:{dataset_version}",
@@ -153,7 +181,15 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             "schema_version": definition.get("data_schema_version"),
         },
     )
-    bundle_node = _node("data_bundle", bundle_version, {"data_bundle_version": bundle_version, "dataset_id": dataset_id, "dataset_version": dataset_version})
+    bundle_node = _node(
+        "data_bundle",
+        bundle_version,
+        {
+            "data_bundle_version": bundle_version,
+            "dataset_id": dataset_id,
+            "dataset_version": dataset_version,
+        },
+    )
 
     nodes: dict[str, ProvenanceNode] = {
         root.key: root,
@@ -168,7 +204,6 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
     ]
 
     strategy_ids: set[str] = set(members)
-    experiments: list[ProvenanceNode] = []
     for candidate_id, experiment_id_value in sorted(experiment_map.items()):
         experiment_id = str(experiment_id_value)
         experiment = store.get_experiment(experiment_id)
@@ -178,7 +213,10 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
         strategy_id = str(experiment["strategy_id"])
         if str(candidate_id) != strategy_id:
             raise ValueError(f"experiment strategy mismatch: {experiment_id}")
-        if str(experiment["dataset_id"]) != dataset_id or str(experiment["dataset_version"]) != dataset_version:
+        if (
+            str(experiment["dataset_id"]) != dataset_id
+            or str(experiment["dataset_version"]) != dataset_version
+        ):
             raise ValueError(f"experiment dataset mismatch: {experiment_id}")
         strategy_ids.add(strategy_id)
         experiment_node = _node(
@@ -195,37 +233,66 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
                 "reason": experiment["reason"],
             },
         )
-        evidence_node = _node("evaluation_evidence", experiment_id, {"experiment_id": experiment_id, "evidence": evidence})
+        evidence_node = _node(
+            "evaluation_evidence",
+            experiment_id,
+            {"experiment_id": experiment_id, "evidence": evidence},
+        )
         promotion = evidence.get("promotion") if isinstance(evidence, dict) else None
-        if not isinstance(promotion, dict) or not isinstance(promotion.get("stage"), str) or not isinstance(promotion.get("eligible"), bool):
+        if (
+            not isinstance(promotion, dict)
+            or not isinstance(promotion.get("stage"), str)
+            or not isinstance(promotion.get("eligible"), bool)
+        ):
             raise ValueError(f"promotion provenance is incomplete: {experiment_id}")
-        promotion_node = _node("promotion", experiment_id, {"experiment_id": experiment_id, **promotion})
+        promotion_node = _node(
+            "promotion",
+            experiment_id,
+            {"experiment_id": experiment_id, **promotion},
+        )
         nodes[f"experiment:{experiment_id}"] = experiment_node
         nodes[f"evidence:{experiment_id}"] = evidence_node
         nodes[f"promotion:{experiment_id}"] = promotion_node
-        experiments.append(experiment_node)
-        strategy_node_key = f"strategy:{strategy_id}"
-        # Strategy nodes are added by the lineage builder below.
-        edges.extend([
-            _edge(experiment_node, evidence_node, "produced_evidence"),
-            _edge(evidence_node, promotion_node, "evaluated_for"),
-            _edge(experiment_node, portfolio_node, "candidate_for"),
-            _edge(experiment_node, dataset_node, "uses_dataset"),
-        ])
+        edges.extend(
+            [
+                _edge(experiment_node, evidence_node, "produced_evidence"),
+                _edge(evidence_node, promotion_node, "evaluated_for"),
+                _edge(experiment_node, portfolio_node, "candidate_for"),
+                _edge(experiment_node, dataset_node, "uses_dataset"),
+            ]
+        )
         if promotion["eligible"]:
             if strategy_id not in members:
-                raise ValueError(f"eligible experiment not represented by portfolio member: {experiment_id}")
-            edges.append(_edge(promotion_node, portfolio_node, "promoted_to_candidate"))
-        else:
-            if strategy_id in members:
-                raise ValueError(f"ineligible experiment selected into portfolio: {experiment_id}")
-        # Keep this relation after strategy nodes are materialized.
-        edges.append(ProvenanceEdge("__strategy__" + strategy_node_key, experiment_node.node_id, "tested"))
+                raise ValueError(
+                    "eligible experiment not represented by portfolio member: "
+                    f"{experiment_id}"
+                )
+            edges.append(
+                _edge(promotion_node, portfolio_node, "promoted_to_candidate")
+            )
+        elif strategy_id in members:
+            raise ValueError(f"ineligible experiment selected into portfolio: {experiment_id}")
+        edges.append(
+            ProvenanceEdge(
+                "__strategy__" + f"strategy:{strategy_id}",
+                experiment_node.node_id,
+                "tested",
+            )
+        )
 
     lineage_nodes, lineage_edges = _lineage_nodes(store, strategy_ids)
-    nodes.update({f"strategy:{key}": value for key, value in lineage_nodes.items() if not key.startswith("lineage:")})
-    nodes.update({key: value for key, value in lineage_nodes.items() if key.startswith("lineage:")})
+    nodes.update(
+        {
+            f"strategy:{key}": value
+            for key, value in lineage_nodes.items()
+            if not key.startswith("lineage:")
+        }
+    )
+    nodes.update(
+        {key: value for key, value in lineage_nodes.items() if key.startswith("lineage:")}
+    )
     edges.extend(lineage_edges)
+
     normalized_edges: list[ProvenanceEdge] = []
     for edge in edges:
         source = edge.source
@@ -243,8 +310,14 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
     for item in attribution:
         strategy_id = str(item.get("strategy_id"))
         if strategy_id not in members:
-            raise ValueError(f"attribution references non-member strategy: {strategy_id}")
-        attribution_node = _node("attribution", f"{run_id}:{strategy_id}", {"run_id": run_id, **item})
+            raise ValueError(
+                f"attribution references non-member strategy: {strategy_id}"
+            )
+        attribution_node = _node(
+            "attribution",
+            f"{run_id}:{strategy_id}",
+            {"run_id": run_id, **item},
+        )
         nodes[f"attribution:{strategy_id}"] = attribution_node
         normalized_edges.append(_edge(attribution_node, root, "contributes_to"))
 
@@ -256,7 +329,11 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
         strategy_id = str(item.get("strategy_id") or "")
         if not event_id or strategy_id not in members:
             raise ValueError("audit provenance is incomplete")
-        audit_node = _node("audit_event", f"{run_id}:{event_id}", {"run_id": run_id, **item})
+        audit_node = _node(
+            "audit_event",
+            f"{run_id}:{event_id}",
+            {"run_id": run_id, **item},
+        )
         nodes[f"audit:{event_id}"] = audit_node
         normalized_edges.append(_edge(root, audit_node, "records"))
 
@@ -264,13 +341,22 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
     if not isinstance(fill_lineage, list):
         raise ValueError("fill lineage is missing")
     for item in fill_lineage:
-        if not isinstance(item, dict) or not all(isinstance(item.get(key), str) and item[key] for key in ("event_id", "decision_id", "reason")):
+        if not isinstance(item, dict) or not all(
+            isinstance(item.get(key), str) and item[key]
+            for key in ("event_id", "decision_id", "reason")
+        ):
             raise ValueError("fill lineage is incomplete")
-        lineage_node = _node("fill_lineage", f"{run_id}:{item['event_id']}", {"run_id": run_id, **item})
+        lineage_node = _node(
+            "fill_lineage",
+            f"{run_id}:{item['event_id']}",
+            {"run_id": run_id, **item},
+        )
         nodes[f"fill:{item['event_id']}"] = lineage_node
         audit_node = nodes.get(f"audit:{item['event_id']}")
         if audit_node is None:
-            raise ValueError(f"fill lineage references unknown audit event: {item['event_id']}")
+            raise ValueError(
+                f"fill lineage references unknown audit event: {item['event_id']}"
+            )
         normalized_edges.append(_edge(audit_node, lineage_node, "explained_by"))
 
     manifest = _node(
@@ -287,20 +373,41 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
     verification_node = _node(
         "replay_verification",
         run_id,
-        {"run_id": run_id, "verified": True, "ledger_fingerprint": config.get("ledger_fingerprint")},
+        {
+            "run_id": run_id,
+            "verified": True,
+            "ledger_fingerprint": config.get("ledger_fingerprint"),
+        },
     )
     nodes[f"verification:{run_id}"] = verification_node
     normalized_edges.append(_edge(verification_node, root, "verifies"))
 
-    ordered_nodes = tuple(sorted(nodes.values(), key=lambda node: (node.kind, node.key, node.node_id)))
-    ordered_edges = tuple(sorted(set(normalized_edges), key=lambda edge: (edge.source, edge.target, edge.relation)))
+    ordered_nodes = tuple(
+        sorted(nodes.values(), key=lambda node: (node.kind, node.key, node.node_id))
+    )
+    ordered_edges = tuple(
+        sorted(
+            set(normalized_edges),
+            key=lambda edge: (edge.source, edge.target, edge.relation),
+        )
+    )
     payload = {
         "schema_version": PROVENANCE_GRAPH_SCHEMA_VERSION,
         "nodes": [
-            {"node_id": node.node_id, "kind": node.kind, "key": node.key, "attributes": node.attributes}
+            {
+                "node_id": node.node_id,
+                "kind": node.kind,
+                "key": node.key,
+                "attributes": node.attributes,
+            }
             for node in ordered_nodes
         ],
         "edges": [edge.__dict__ for edge in ordered_edges],
     }
     fingerprint = hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()[:24]
-    return ResearchProvenanceGraph(PROVENANCE_GRAPH_SCHEMA_VERSION, ordered_nodes, ordered_edges, fingerprint)
+    return ResearchProvenanceGraph(
+        PROVENANCE_GRAPH_SCHEMA_VERSION,
+        ordered_nodes,
+        ordered_edges,
+        fingerprint,
+    )
