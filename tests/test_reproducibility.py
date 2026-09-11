@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from atsf.portfolio_executor import execute_persisted_portfolio
@@ -18,18 +20,93 @@ def execute(registry: ExperimentRegistry):
     return result
 
 
+def certificate_for(registry: ExperimentRegistry, run_id: str):
+    verification = verify_persisted_portfolio_run(registry, run_id)
+    assert verification.valid is True
+    run = registry.get_portfolio_run(run_id)
+    return build_reproducibility_certificate(registry, run, verification)
+
+
 def test_reproducibility_certificate_is_deterministic() -> None:
     registry = ExperimentRegistry()
     result = execute(registry)
-    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
-    assert verification.valid is True
-    run = registry.get_portfolio_run(result.identity.run_id)
-    first = build_reproducibility_certificate(run, verification)
-    second = build_reproducibility_certificate(run, verification)
+    first = certificate_for(registry, result.identity.run_id)
+    second = certificate_for(registry, result.identity.run_id)
     assert first == second
     assert len(first.certificate_id) == 24
     assert first.verified is True
+    assert len(first.research_fingerprint) == 24
+    assert len(first.lineage_fingerprint) == 16
+    assert len(first.attribution_fingerprint) == 16
     assert first.event_count == len(result.audit_events)
+    registry.close()
+
+
+def test_certificate_binds_research_provenance() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    baseline = certificate_for(registry, result.identity.run_id)
+
+    run = registry.get_portfolio_run(result.identity.run_id)
+    portfolio = registry.get_portfolio(run["portfolio_id"])
+    experiment_id = next(iter(portfolio["definition"]["experiment_ids"].values()))
+
+    evidence = registry.get_evaluation_evidence(experiment_id)
+    evidence["certificate_test_marker"] = "changed"
+    registry.save_evaluation_evidence(experiment_id, evidence)
+    evidence_changed = certificate_for(registry, result.identity.run_id)
+    assert evidence_changed.research_fingerprint != baseline.research_fingerprint
+    assert evidence_changed.certificate_id != baseline.certificate_id
+
+    registry._connection.execute(
+        "UPDATE lineage SET parameters_json = ? WHERE strategy_id = (SELECT strategy_id FROM experiments WHERE experiment_id = ?)",
+        (json.dumps({"certificate_test_marker": "changed"}), experiment_id),
+    )
+    registry._connection.commit()
+    lineage_changed = certificate_for(registry, result.identity.run_id)
+    assert lineage_changed.lineage_fingerprint != evidence_changed.lineage_fingerprint
+    assert lineage_changed.research_fingerprint != evidence_changed.research_fingerprint
+    registry.close()
+
+
+def test_certificate_binds_attribution_and_portfolio_definition() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    baseline = certificate_for(registry, result.identity.run_id)
+    run = registry.get_portfolio_run(result.identity.run_id)
+
+    registry._connection.execute(
+        "UPDATE portfolio_attribution SET return_contribution = return_contribution + 0.001 WHERE run_id = ?",
+        (run["run_id"],),
+    )
+    registry._connection.commit()
+    attribution_changed = certificate_for(registry, result.identity.run_id)
+    assert attribution_changed.attribution_fingerprint != baseline.attribution_fingerprint
+    assert attribution_changed.certificate_id != baseline.certificate_id
+
+    portfolio = registry.get_portfolio(run["portfolio_id"])
+    definition = dict(portfolio["definition"])
+    definition["certificate_test_marker"] = "changed"
+    registry._connection.execute(
+        "UPDATE portfolios SET definition_json = ? WHERE portfolio_id = ?",
+        (json.dumps(definition, sort_keys=True), run["portfolio_id"]),
+    )
+    registry._connection.commit()
+    portfolio_changed = certificate_for(registry, result.identity.run_id)
+    assert portfolio_changed.research_fingerprint != attribution_changed.research_fingerprint
+    assert portfolio_changed.certificate_id != attribution_changed.certificate_id
+    registry.close()
+
+
+def test_certificate_requires_complete_provenance() -> None:
+    registry = ExperimentRegistry()
+    result = execute(registry)
+    run = registry.get_portfolio_run(result.identity.run_id)
+    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
+    registry._connection.execute("DELETE FROM lineage")
+    registry._connection.commit()
+    with pytest.raises(ValueError, match="strategy provenance is incomplete"):
+        build_reproducibility_certificate(registry, run, verification)
     registry.close()
 
 
@@ -40,5 +117,5 @@ def test_unverified_run_cannot_be_certified() -> None:
     bad = verification.__class__(verification.run_id, False, verification.manifest, "tampered")
     run = registry.get_portfolio_run(result.identity.run_id)
     with pytest.raises(ValueError, match="unverified"):
-        build_reproducibility_certificate(run, bad)
+        build_reproducibility_certificate(registry, run, bad)
     registry.close()
