@@ -19,7 +19,8 @@ class ExperimentRegistry:
     """SQLite persistence boundary for reproducible research and portfolio metadata."""
 
     def __init__(self, path: str | Path = ":memory:") -> None:
-        self._connection = sqlite3.connect(str(path))
+        # FastAPI/Starlette executes synchronous endpoints in worker threads.
+        self._connection = sqlite3.connect(str(path), check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._datasets = DatasetRegistry(self._connection)
         self._create_schema()
@@ -111,94 +112,68 @@ class ExperimentRegistry:
     def save_experiment(self, spec: ExperimentSpec, result: ExperimentResult) -> None:
         self.require_dataset(spec.dataset_id, spec.dataset_version)
         identifier = self.save_strategy(spec.strategy)
-        self._connection.execute(
-            "INSERT OR REPLACE INTO experiments(experiment_id, strategy_id, dataset_id, dataset_version, seed, status, score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (result.experiment_id, identifier, spec.dataset_id, spec.dataset_version, spec.seed, result.status, result.score, result.reason),
-        )
+        self._connection.execute("INSERT OR REPLACE INTO experiments(experiment_id, strategy_id, dataset_id, dataset_version, seed, status, score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (result.experiment_id, identifier, spec.dataset_id, spec.dataset_version, spec.seed, result.status, result.score, result.reason))
         self._connection.commit()
 
     def save_evaluation_evidence(self, experiment_id: str, evidence: dict[str, Any]) -> None:
         payload = json.dumps(evidence, sort_keys=True, allow_nan=False)
-        if self.get_experiment(experiment_id) is None:
-            raise KeyError(f"unknown experiment: {experiment_id}")
-        self._connection.execute("INSERT OR REPLACE INTO evaluation_evidence(experiment_id, evidence_json) VALUES (?, ?)", (experiment_id, payload))
-        self._connection.commit()
+        if self.get_experiment(experiment_id) is None: raise KeyError(f"unknown experiment: {experiment_id}")
+        self._connection.execute("INSERT OR REPLACE INTO evaluation_evidence(experiment_id, evidence_json) VALUES (?, ?)", (experiment_id, payload)); self._connection.commit()
 
     def get_evaluation_evidence(self, experiment_id: str) -> dict[str, Any] | None:
         row = self._connection.execute("SELECT evidence_json FROM evaluation_evidence WHERE experiment_id = ?", (experiment_id,)).fetchone()
         return None if row is None else json.loads(row["evidence_json"])
 
     def get_experiment(self, identifier: str) -> dict[str, Any] | None:
-        row = self._connection.execute("SELECT * FROM experiments WHERE experiment_id = ?", (identifier,)).fetchone()
-        return None if row is None else dict(row)
+        row = self._connection.execute("SELECT * FROM experiments WHERE experiment_id = ?", (identifier,)).fetchone(); return None if row is None else dict(row)
 
     def list_experiments(self, dataset_id: str | None = None) -> list[dict[str, Any]]:
-        query = "SELECT * FROM experiments" + (" WHERE dataset_id = ?" if dataset_id is not None else "") + " ORDER BY experiment_id"
-        params = (dataset_id,) if dataset_id is not None else ()
+        query = "SELECT * FROM experiments" + (" WHERE dataset_id = ?" if dataset_id is not None else "") + " ORDER BY experiment_id"; params = (dataset_id,) if dataset_id is not None else ()
         return [dict(row) for row in self._connection.execute(query, params).fetchall()]
 
     def rank_experiments(self, dataset_id: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
-        if limit is not None and limit <= 0:
-            raise ValueError("limit must be positive")
-        query = "SELECT * FROM experiments WHERE status = 'eligible' "
-        params: tuple[Any, ...] = ()
-        if dataset_id is not None:
-            query += "AND dataset_id = ? "
-            params = (dataset_id,)
+        if limit is not None and limit <= 0: raise ValueError("limit must be positive")
+        query = "SELECT * FROM experiments WHERE status = 'eligible' "; params: tuple[Any, ...] = ()
+        if dataset_id is not None: query += "AND dataset_id = ? "; params = (dataset_id,)
         query += "ORDER BY score DESC, experiment_id ASC"
-        if limit is not None:
-            query += " LIMIT ?"
-            params += (limit,)
+        if limit is not None: query += " LIMIT ?"; params += (limit,)
         return [dict(row) for row in self._connection.execute(query, params).fetchall()]
 
     def save_lineage(self, record: LineageRecord) -> None:
-        self._connection.execute("INSERT OR REPLACE INTO lineage(strategy_id, generation, parent_ids_json, operator, parameters_json) VALUES (?, ?, ?, ?, ?)",
-                                 (record.strategy_id, record.generation, json.dumps(record.parent_ids), record.operator, json.dumps(record.parameters, sort_keys=True)))
-        self._connection.commit()
+        self._connection.execute("INSERT OR REPLACE INTO lineage(strategy_id, generation, parent_ids_json, operator, parameters_json) VALUES (?, ?, ?, ?, ?)", (record.strategy_id, record.generation, json.dumps(record.parent_ids), record.operator, json.dumps(record.parameters, sort_keys=True))); self._connection.commit()
 
     def get_lineage(self, identifier: str) -> LineageRecord | None:
         row = self._connection.execute("SELECT * FROM lineage WHERE strategy_id = ?", (identifier,)).fetchone()
-        if row is None:
-            return None
+        if row is None: return None
         return LineageRecord(row["strategy_id"], row["generation"], tuple(json.loads(row["parent_ids_json"])), row["operator"], json.loads(row["parameters_json"]))
 
     def save_portfolio(self, portfolio_id: str, definition: dict[str, Any], members: dict[str, float]) -> None:
-        if not portfolio_id or not members:
-            raise ValueError("portfolio_id and members are required")
+        if not portfolio_id or not members: raise ValueError("portfolio_id and members are required")
         payload = json.dumps(definition, sort_keys=True, allow_nan=False)
-        if any(not isinstance(weight, (int, float)) or not math.isfinite(weight) or weight < 0 for weight in members.values()):
-            raise ValueError("portfolio weights must be finite and non-negative numbers")
-        if sum(members.values()) > 1.0 + 1e-12:
-            raise ValueError("portfolio weights exceed 100%")
+        if any(not isinstance(weight, (int, float)) or not math.isfinite(weight) or weight < 0 for weight in members.values()): raise ValueError("portfolio weights must be finite and non-negative numbers")
+        if sum(members.values()) > 1.0 + 1e-12: raise ValueError("portfolio weights exceed 100%")
         with self._connection:
             for identifier in members:
-                if self.get_strategy(identifier) is None:
-                    raise ValueError(f"unknown strategy: {identifier}")
+                if self.get_strategy(identifier) is None: raise ValueError(f"unknown strategy: {identifier}")
             existing_run = self._connection.execute("SELECT 1 FROM portfolio_runs WHERE portfolio_id = ? LIMIT 1", (portfolio_id,)).fetchone()
-            if existing_run is not None:
-                raise ValueError("portfolio is immutable after paper execution")
-            self._connection.execute("INSERT OR REPLACE INTO portfolios(portfolio_id, definition_json) VALUES (?, ?)", (portfolio_id, payload))
-            self._connection.execute("DELETE FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,))
-            self._connection.executemany("INSERT INTO portfolio_members(portfolio_id, strategy_id, weight, rank) VALUES (?, ?, ?, ?)",
-                                         [(portfolio_id, sid, float(weight), rank) for rank, (sid, weight) in enumerate(members.items())])
+            if existing_run is not None: raise ValueError("portfolio is immutable after paper execution")
+            self._connection.execute("INSERT OR REPLACE INTO portfolios(portfolio_id, definition_json) VALUES (?, ?)", (portfolio_id, payload)); self._connection.execute("DELETE FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,))
+            self._connection.executemany("INSERT INTO portfolio_members(portfolio_id, strategy_id, weight, rank) VALUES (?, ?, ?, ?)", [(portfolio_id, sid, float(weight), rank) for rank, (sid, weight) in enumerate(members.items())])
 
     def get_portfolio(self, portfolio_id: str) -> dict[str, Any] | None:
         row = self._connection.execute("SELECT definition_json FROM portfolios WHERE portfolio_id = ?", (portfolio_id,)).fetchone()
-        if row is None:
-            return None
+        if row is None: return None
         members = self._connection.execute("SELECT strategy_id, weight FROM portfolio_members WHERE portfolio_id = ? ORDER BY rank", (portfolio_id,)).fetchall()
         return {"portfolio_id": portfolio_id, "definition": json.loads(row["definition_json"]), "members": {item["strategy_id"]: item["weight"] for item in members}}
 
     def _validate_portfolio_run_payload(self, run_id: str, portfolio_id: str, final_equity: float, attribution: list[dict[str, Any]], dataset_id: str, dataset_version: str, data_bundle_version: str, execution_fingerprint: str, execution_config: dict[str, Any], audit_events: list[PortfolioAuditEvent]) -> tuple[str, list[tuple[Any, ...]], list[tuple[Any, ...]]]:
         if not run_id or not math.isfinite(final_equity): raise ValueError("run_id and finite final_equity are required")
-        required = ((dataset_id, "dataset_id"), (dataset_version, "dataset_version"), (data_bundle_version, "data_bundle_version"), (execution_fingerprint, "execution_fingerprint"))
-        for value, label in required:
+        for value, label in ((dataset_id, "dataset_id"), (dataset_version, "dataset_version"), (data_bundle_version, "data_bundle_version"), (execution_fingerprint, "execution_fingerprint")):
             if not isinstance(value, str) or not value.strip(): raise ValueError(f"{label} is required")
         execution_payload = json.dumps(execution_config, sort_keys=True, allow_nan=False)
         if self._connection.execute("SELECT 1 FROM portfolios WHERE portfolio_id = ?", (portfolio_id,)).fetchone() is None: raise ValueError(f"unknown portfolio: {portfolio_id}")
         if self._connection.execute("SELECT 1 FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone() is not None: raise ValueError("portfolio run already exists; execution is immutable")
-        portfolio_members = {row[0] for row in self._connection.execute("SELECT strategy_id FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,)).fetchall()}
-        seen: set[str] = set(); attribution_rows: list[tuple[Any, ...]] = []
+        portfolio_members = {row[0] for row in self._connection.execute("SELECT strategy_id FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,)).fetchall()}; seen: set[str] = set(); attribution_rows: list[tuple[Any, ...]] = []
         for item in attribution:
             if not isinstance(item, dict) or "strategy_id" not in item: raise ValueError("attribution items require strategy_id")
             strategy = str(item["strategy_id"])
@@ -217,21 +192,15 @@ class ExperimentRegistry:
     def save_portfolio_execution(self, run_id: str, portfolio_id: str, final_equity: float, halted: bool, halt_reason: str | None, attribution: list[dict[str, Any]], *, dataset_id: str, dataset_version: str, data_bundle_version: str, execution_fingerprint: str, execution_config: dict[str, Any], audit_events: list[PortfolioAuditEvent]) -> None:
         execution_payload, attribution_rows, audit_rows = self._validate_portfolio_run_payload(run_id, portfolio_id, final_equity, attribution, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config, audit_events)
         with self._connection:
-            self._connection.execute("INSERT INTO portfolio_runs(run_id, portfolio_id, final_equity, halted, halt_reason) VALUES (?, ?, ?, ?, ?)", (run_id, portfolio_id, final_equity, int(halted), halt_reason))
-            self._connection.execute("INSERT INTO portfolio_run_provenance(run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json) VALUES (?, ?, ?, ?, ?, ?)", (run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_payload))
-            self._connection.executemany("INSERT INTO portfolio_attribution(run_id, strategy_id, return_contribution, risk_contribution) VALUES (?, ?, ?, ?)", attribution_rows)
-            self._connection.executemany("INSERT INTO portfolio_audit_events(run_id, event_id, sequence, strategy_id, action, timestamp, quantity, price, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", audit_rows)
+            self._connection.execute("INSERT INTO portfolio_runs(run_id, portfolio_id, final_equity, halted, halt_reason) VALUES (?, ?, ?, ?, ?)", (run_id, portfolio_id, final_equity, int(halted), halt_reason)); self._connection.execute("INSERT INTO portfolio_run_provenance(run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json) VALUES (?, ?, ?, ?, ?, ?)", (run_id, dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_payload)); self._connection.executemany("INSERT INTO portfolio_attribution(run_id, strategy_id, return_contribution, risk_contribution) VALUES (?, ?, ?, ?)", attribution_rows); self._connection.executemany("INSERT INTO portfolio_audit_events(run_id, event_id, sequence, strategy_id, action, timestamp, quantity, price, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", audit_rows)
 
     def save_portfolio_run(self, run_id: str, portfolio_id: str, final_equity: float, halted: bool, halt_reason: str | None, attribution: list[dict[str, Any]], *, dataset_id: str = "unspecified", dataset_version: str = "unspecified", data_bundle_version: str = "unspecified", execution_fingerprint: str = "legacy", execution_config: dict[str, Any] | None = None) -> None:
-        execution_config = execution_config or {}
-        self.save_portfolio_execution(run_id, portfolio_id, final_equity, halted, halt_reason, attribution, dataset_id=dataset_id, dataset_version=dataset_version, data_bundle_version=data_bundle_version, execution_fingerprint=execution_fingerprint, execution_config=execution_config, audit_events=[])
+        self.save_portfolio_execution(run_id, portfolio_id, final_equity, halted, halt_reason, attribution, dataset_id=dataset_id, dataset_version=dataset_version, data_bundle_version=data_bundle_version, execution_fingerprint=execution_fingerprint, execution_config=execution_config or {}, audit_events=[])
 
     def save_portfolio_audit_events(self, run_id: str, events: list[PortfolioAuditEvent]) -> None:
         if self._connection.execute("SELECT 1 FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone() is None: raise ValueError(f"unknown portfolio run: {run_id}")
-        portfolio_id = self._connection.execute("SELECT portfolio_id FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone()[0]
-        members = {row[0] for row in self._connection.execute("SELECT strategy_id FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,)).fetchall()}
-        existing = self._connection.execute("SELECT 1 FROM portfolio_audit_events WHERE run_id = ? LIMIT 1", (run_id,)).fetchone()
-        if existing is not None: raise ValueError("audit ledger already exists; execution is immutable")
+        portfolio_id = self._connection.execute("SELECT portfolio_id FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone()[0]; members = {row[0] for row in self._connection.execute("SELECT strategy_id FROM portfolio_members WHERE portfolio_id = ?", (portfolio_id,)).fetchall()}
+        if self._connection.execute("SELECT 1 FROM portfolio_audit_events WHERE run_id = ? LIMIT 1", (run_id,)).fetchone() is not None: raise ValueError("audit ledger already exists; execution is immutable")
         ordered = sorted(events, key=lambda event: event.sequence)
         if [event.sequence for event in ordered] != list(range(len(ordered))): raise ValueError("audit event sequences must be contiguous from zero")
         rows = []; seen: set[str] = set()
@@ -244,9 +213,7 @@ class ExperimentRegistry:
     def get_portfolio_run(self, run_id: str) -> dict[str, Any] | None:
         row = self._connection.execute("SELECT * FROM portfolio_runs WHERE run_id = ?", (run_id,)).fetchone()
         if row is None: return None
-        provenance = self._connection.execute("SELECT dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json FROM portfolio_run_provenance WHERE run_id = ?", (run_id,)).fetchone()
-        attribution = self._connection.execute("SELECT strategy_id, return_contribution, risk_contribution FROM portfolio_attribution WHERE run_id = ? ORDER BY strategy_id", (run_id,)).fetchall()
-        audit = self._connection.execute("SELECT event_id, sequence, strategy_id, action, timestamp, quantity, price, fee FROM portfolio_audit_events WHERE run_id = ? ORDER BY sequence", (run_id,)).fetchall()
+        provenance = self._connection.execute("SELECT dataset_id, dataset_version, data_bundle_version, execution_fingerprint, execution_config_json FROM portfolio_run_provenance WHERE run_id = ?", (run_id,)).fetchone(); attribution = self._connection.execute("SELECT strategy_id, return_contribution, risk_contribution FROM portfolio_attribution WHERE run_id = ? ORDER BY strategy_id", (run_id,)).fetchall(); audit = self._connection.execute("SELECT event_id, sequence, strategy_id, action, timestamp, quantity, price, fee FROM portfolio_audit_events WHERE run_id = ? ORDER BY sequence", (run_id,)).fetchall()
         result = {"run_id": row["run_id"], "portfolio_id": row["portfolio_id"], "final_equity": row["final_equity"], "halted": bool(row["halted"]), "halt_reason": row["halt_reason"], "attribution": [dict(item) for item in attribution], "audit_events": [dict(item) for item in audit]}
         if provenance is not None: result["provenance"] = {"dataset_id": provenance["dataset_id"], "dataset_version": provenance["dataset_version"], "data_bundle_version": provenance["data_bundle_version"], "execution_fingerprint": provenance["execution_fingerprint"], "execution_config": json.loads(provenance["execution_config_json"])}
         return result
@@ -263,5 +230,4 @@ class ExperimentRegistry:
         with self._connection: self._connection.execute("INSERT INTO reproducibility_certificates(certificate_id, run_id, certificate_json) VALUES (?, ?, ?)", (certificate_id, run_id, payload))
 
     def get_reproducibility_certificate(self, run_id: str) -> dict[str, Any] | None:
-        row = self._connection.execute("SELECT certificate_json FROM reproducibility_certificates WHERE run_id = ?", (run_id,)).fetchone()
-        return None if row is None else json.loads(row["certificate_json"])
+        row = self._connection.execute("SELECT certificate_json FROM reproducibility_certificates WHERE run_id = ?", (run_id,)).fetchone(); return None if row is None else json.loads(row["certificate_json"])
