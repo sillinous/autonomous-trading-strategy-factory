@@ -24,6 +24,7 @@ class ReproducibilityCertificate:
     ledger_fingerprint: str
     lineage_fingerprint: str
     attribution_fingerprint: str
+    verification_fingerprint: str
     event_count: int
 
 
@@ -141,6 +142,14 @@ def build_reproducibility_certificate(
     ledger_fingerprint = verification.manifest.ledger_fingerprint
     lineage_fingerprint = _fingerprint(research["lineage"])
     attribution_fingerprint = _fingerprint(research["attribution"])
+    verification_fingerprint = _fingerprint(
+        {
+            "valid": verification.valid,
+            "reason": verification.reason,
+            "event_count": verification.manifest.event_count,
+            "ledger_fingerprint": ledger_fingerprint,
+        }
+    )
     research_fingerprint = _fingerprint(
         {
             "portfolio_id": research["portfolio_id"],
@@ -164,6 +173,7 @@ def build_reproducibility_certificate(
         "ledger_fingerprint": ledger_fingerprint,
         "lineage_fingerprint": lineage_fingerprint,
         "attribution_fingerprint": attribution_fingerprint,
+        "verification_fingerprint": verification_fingerprint,
         "event_count": verification.manifest.event_count,
     }
     certificate_id = _fingerprint(payload, length=24)
@@ -179,5 +189,6 @@ def build_reproducibility_certificate(
         ledger_fingerprint=ledger_fingerprint,
         lineage_fingerprint=lineage_fingerprint,
         attribution_fingerprint=attribution_fingerprint,
+        verification_fingerprint=verification_fingerprint,
         event_count=verification.manifest.event_count,
     )
