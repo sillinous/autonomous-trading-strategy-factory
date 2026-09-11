@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from math import isfinite
 
 from .portfolio_audit import PortfolioAuditEvent, audit_event_id
 
@@ -23,10 +22,7 @@ def execution_manifest(events: list[PortfolioAuditEvent] | tuple[PortfolioAuditE
     event_ids = [audit_event_id(event) for event in ordered]
     if len(set(event_ids)) != len(event_ids):
         raise ValueError("audit events must have unique identities")
-    payload = {
-        "event_count": len(ordered),
-        "events": event_ids,
-    }
+    payload = {"event_count": len(ordered), "events": event_ids}
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()[:16]
