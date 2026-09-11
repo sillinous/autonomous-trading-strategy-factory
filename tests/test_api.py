@@ -2,7 +2,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from atsf.api import create_app
-from atsf.dataset_bundle import DatasetBundleIdentity
+from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
@@ -36,11 +36,19 @@ def seed(registry: ExperimentRegistry) -> str:
         spec.experiment_id,
         {"promotion": {"stage": "paper", "eligible": True, "reasons": []}},
     )
+    market_data = pd.DataFrame([bar for bar in bars()]).set_index("timestamp")
+    data_bundle_version = bundle_identity(
+        {strategy_id: market_data},
+        "prices",
+        source="fixture",
+        timeframe="1d",
+    ).version
     registry.save_portfolio(
         "portfolio-1",
         {
             "dataset_id": "prices",
             "dataset_version": "v1",
+            "data_bundle_version": data_bundle_version,
             "data_source": "fixture",
             "data_timeframe": "1d",
             "data_schema_version": "ohlcv.v1",
