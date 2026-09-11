@@ -1,10 +1,10 @@
 import pytest
 
+from atsf.portfolio_executor import execute_persisted_portfolio
 from atsf.portfolio_replay import verify_persisted_portfolio_run
 from atsf.reproducibility import build_reproducibility_certificate
 from atsf.registry import ExperimentRegistry
 from tests.test_portfolio_executor import make_data, seed_persisted_portfolio
-from atsf.portfolio_executor import execute_persisted_portfolio
 
 
 def execute(registry: ExperimentRegistry):
@@ -21,10 +21,7 @@ def execute(registry: ExperimentRegistry):
 def test_reproducibility_certificate_is_deterministic() -> None:
     registry = ExperimentRegistry()
     result = execute(registry)
-    verification = verify_persisted_portfolio_run(registry, result.identity.run_id, data={
-        result.audit_events[0].strategy_id: make_data(),
-        next(strategy_id for strategy_id in registry.get_portfolio("portfolio-1")["members"] if strategy_id != result.audit_events[0].strategy_id): make_data(),
-    })
+    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
     assert verification.valid is True
     run = registry.get_portfolio_run(result.identity.run_id)
     first = build_reproducibility_certificate(run, verification)
@@ -32,6 +29,7 @@ def test_reproducibility_certificate_is_deterministic() -> None:
     assert first == second
     assert len(first.certificate_id) == 24
     assert first.verified is True
+    assert first.event_count == len(result.audit_events)
     registry.close()
 
 
