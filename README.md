@@ -13,6 +13,7 @@ An experimental platform for autonomous quantitative strategy research, historic
 - Persisted portfolios and paper runs are immutable and auditable.
 - Market-data access is provider-neutral; vendor adapters must normalize data through the canonical schema.
 - Provider-declared source, timeframe, and schema metadata are authoritative and cannot be overridden by ingestion callers.
+- Strategy health feedback and replacement-research requests are persisted as immutable provenance artifacts.
 
 ## Initial scope
 
@@ -28,10 +29,12 @@ An experimental platform for autonomous quantitative strategy research, historic
 10. Source-neutral market-data provider contract
 11. External historical-data adapter with dataset provenance
 12. Deterministic provider-response cache
+13. Persisted strategy-health feedback and replacement-research queue
+14. End-to-end research-to-paper provenance graph and reproducibility certificates
 
 ## Service
 
-The HTTP service is created by `atsf.api:create_app` and exposes health, capability, persisted portfolio, paper-run, and run-audit endpoints. It accepts market data only for execution against an already persisted portfolio; callers cannot submit arbitrary executable strategy code.
+The HTTP service is created by `atsf.api:create_app` and exposes health, capability, persisted portfolio, paper-run, run-audit, provenance-graph, certificate, and strategy-feedback endpoints. It accepts market data only for execution against an already persisted portfolio; callers cannot submit arbitrary executable strategy code.
 
 For a local service using the default registry path:
 
@@ -67,6 +70,10 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 
 External data must enter the system through the provider/ingestion boundary and be fingerprinted into a dataset bundle before research or paper execution. This prevents silent changes in source, timeframe, schema, or underlying bars from masquerading as the same dataset.
 
+## Feedback and replacement research
+
+Paper-strategy health can deterministically transition a strategy to a degraded lifecycle state and create a replacement-research request. Requests can be persisted immutably alongside feedback events, so the reason for replacement work survives process restarts. Feedback events are included in the research provenance graph and their fingerprints are verified before graph materialization.
+
 ## Status
 
-Research-first foundation with deterministic paper execution, a real external historical-data adapter, and a reproducible, tamper-evident provider-response cache. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
+Research-first foundation with deterministic paper execution, a real external historical-data adapter, reproducible/tamper-evident provider-response caching, persisted health feedback, replacement-research requests, and end-to-end provenance attestation. This repository is intentionally not a live-trading system and does not constitute financial advice or a guarantee of profitability.
