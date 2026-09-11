@@ -4,8 +4,14 @@ from fastapi.testclient import TestClient
 from atsf.api import create_app
 from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
+from atsf.feedback_loop import process_strategy_health
+from atsf.feedback_provenance import build_feedback_provenance
+from atsf.feedback_registry import FeedbackEventStore
+from atsf.lifecycle import StrategyLifecycle
 from atsf.lineage import LineageRecord
+from atsf.monitoring import DegradationReport
 from atsf.registry import ExperimentRegistry
+from atsf.research_queue import ResearchQueue
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
 
 
@@ -119,6 +125,33 @@ def test_research_run_endpoint_persists_research_artifacts(monkeypatch):
     assert len(payload["dataset_version"]) == 16
     assert payload["generations"] == 1
     assert payload["final_population_size"] == 1
+    registry.close()
+
+
+def test_strategy_feedback_endpoint_exposes_persisted_history(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    report = DegradationReport(
+        degraded=True,
+        observations=30,
+        total_return=-0.12,
+        max_drawdown=-0.22,
+        volatility=0.08,
+        reasons=("minimum return breached",),
+    )
+    action = process_strategy_health(strategy_id, StrategyLifecycle(), report, ResearchQueue())
+    event = build_feedback_provenance(strategy_id, action, report, previous_state="active")
+    FeedbackEventStore(registry).save(event)
+
+    client = TestClient(create_app(registry))
+    response = client.get(f"/strategies/{strategy_id}/feedback")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategy_id"] == strategy_id
+    assert payload["event_count"] == 1
+    assert payload["events"][0]["event_id"] == event.event_id
+    assert payload["events"][0]["research_request_id"] == event.research_request_id
     registry.close()
 
 
