@@ -126,6 +126,36 @@ def test_paper_run_endpoint_executes_and_exposes_integrity_verification(monkeypa
     assert verification.json()["valid"] is True
     assert verification.json()["event_count"] == payload["audit_event_count"]
     assert verification.json()["ledger_fingerprint"]
+
+    replay = client.post(
+        f"/runs/{payload['run_id']}/verify-replay",
+        json={"dataset_version": "v1", "data": {strategy_id: bars()}},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["valid"] is True
+    registry.close()
+
+
+def test_replay_verification_rejects_changed_market_data(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    client = TestClient(create_app(registry))
+    response = client.post(
+        "/portfolios/portfolio-1/paper-runs",
+        json={"dataset_version": "v1", "data": {strategy_id: bars()}},
+    )
+    assert response.status_code == 201
+    run_id = response.json()["run_id"]
+    altered = bars()
+    altered[2]["close"] = 9.0
+    replay = client.post(
+        f"/runs/{run_id}/verify-replay",
+        json={"dataset_version": "v1", "data": {strategy_id: altered}},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["valid"] is False
+    assert "data bundle" in replay.json()["reason"]
     registry.close()
 
 
