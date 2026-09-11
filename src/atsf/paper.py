@@ -45,6 +45,14 @@ class PaperBroker:
             raise ValueError("price must be positive")
         return PaperSnapshot(timestamp, self.cash, self.position, self.cash + self.position * price)
 
+    def max_affordable_quantity(self, reference_price: float) -> float:
+        """Return the largest buy quantity whose slipped fill and fee fit available cash."""
+        if reference_price <= 0:
+            raise ValueError("price must be positive")
+        fill_price = reference_price * (1.0 + self.config.slippage_bps / 10_000.0)
+        cost_per_unit = fill_price * (1.0 + self.config.commission_bps / 10_000.0)
+        return self.cash / cost_per_unit
+
     def execute(self, timestamp: pd.Timestamp, side: str, quantity: float, reference_price: float) -> PaperFill:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
@@ -55,15 +63,15 @@ class PaperBroker:
         fee = fill_price * quantity * self.config.commission_bps / 10_000.0
         if side == "buy":
             required = fill_price * quantity + fee
-            if required > self.cash:
+            if required > self.cash + 1e-12:
                 raise ValueError("insufficient paper cash")
             self.cash -= required
             self.position += quantity
         else:
-            if quantity > self.position:
+            if quantity > self.position + 1e-12:
                 raise ValueError("insufficient paper position")
             self.cash += fill_price * quantity - fee
-            self.position -= quantity
+            self.position = max(0.0, self.position - quantity)
         fill = PaperFill(timestamp, side, quantity, fill_price, fee)
         self.fills.append(fill)
         return fill
