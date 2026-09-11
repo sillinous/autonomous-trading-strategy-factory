@@ -38,9 +38,18 @@ uvicorn atsf.api:app --host 127.0.0.1 --port 8000
 
 Set `ATSF_REGISTRY_PATH` to point the service at a persistent SQLite registry. The `/capabilities` endpoint explicitly reports `live_execution_enabled: false`; no live broker or live-order endpoint exists.
 
-### Network exposure
+### API authentication
 
-The service is intended to remain private until authentication and an authenticated reverse proxy are configured. The supplied Docker Compose configuration binds port 8000 to `127.0.0.1` rather than publishing it on all host interfaces. Do not expose the unauthenticated API directly to the internet.
+Operational endpoints support an optional shared API key through `ATSF_API_KEY`. When configured, clients must send `X-API-Key: <key>`; `/health` remains unauthenticated for container healthchecks.
+
+Example:
+
+```bash
+ATSF_API_KEY='replace-with-a-long-random-secret' \
+  uvicorn atsf.api:app --host 127.0.0.1 --port 8000
+```
+
+For any non-local deployment, configure authentication and place the service behind a properly secured reverse proxy or private network. Do not expose the unauthenticated default directly to the public internet.
 
 ## Docker
 
@@ -50,7 +59,7 @@ Build and run the paper-only service with:
 docker compose up --build -d
 ```
 
-The SQLite registry is stored in the named `atsf-data` volume. The container runs as a non-root user and includes an HTTP healthcheck.
+The SQLite registry is stored in the named `atsf-data` volume. The container runs as a non-root user and includes an HTTP healthcheck. Docker Compose binds the API to the host loopback interface by default.
 
 ## Market-data providers
 
