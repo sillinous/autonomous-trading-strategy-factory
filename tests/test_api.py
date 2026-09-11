@@ -133,6 +133,16 @@ def test_paper_run_endpoint_executes_and_exposes_integrity_verification(monkeypa
     )
     assert replay.status_code == 200
     assert replay.json()["valid"] is True
+
+    certificate = client.post(
+        f"/runs/{payload['run_id']}/certificate",
+        json={"dataset_version": "v1", "data": {strategy_id: bars()}},
+    )
+    assert certificate.status_code == 200
+    certificate_payload = certificate.json()
+    assert certificate_payload["verified"] is True
+    assert len(certificate_payload["certificate_id"]) == 24
+    assert certificate_payload["ledger_fingerprint"] == verification.json()["ledger_fingerprint"]
     registry.close()
 
 
