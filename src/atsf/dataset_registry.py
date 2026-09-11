@@ -54,15 +54,16 @@ class DatasetRegistry:
         self,
         identity: DatasetBundleIdentity,
         *,
-        source: str,
+        source: str | None = None,
     ) -> DatasetRecord:
-        if not source.strip():
-            raise ValueError("source is required")
+        """Register identity metadata; ``source`` is an assertion, never an override."""
         if identity.rows <= 0:
             raise ValueError("dataset must contain rows")
-        normalized_source = source.strip()
-        if identity.source not in ("unspecified", normalized_source):
+        if source is not None and source.strip() != identity.source:
             raise ValueError("dataset source does not match its identity")
+        normalized_source = identity.source.strip()
+        if not normalized_source:
+            raise ValueError("dataset identity source is required")
         record = DatasetRecord(
             dataset_id=identity.dataset_id,
             version=identity.version,
