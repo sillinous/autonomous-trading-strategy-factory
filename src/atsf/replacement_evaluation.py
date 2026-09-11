@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pandas as pd
 
 from .fitness import FitnessPolicy
 from .orchestrator import CandidateEvaluation, evaluate_candidate
 from .population import Candidate
-from .promotion import PromotionPolicy
+from .promotion import PromotionDecision, PromotionPolicy
 from .replacement_research import ReplacementResearchResult
 from .validation import ValidationPolicy
 
@@ -33,9 +33,6 @@ def evaluate_replacements(
     """Send replacement hypotheses through the same deterministic gates as normal research."""
     evaluations: list[CandidateEvaluation] = []
     for offset, candidate in enumerate(research.candidates):
-        lineage = None
-        # ReplacementResearch already records parentage in the candidate metadata;
-        # reconstruct a Candidate so the normal evaluator remains the sole authority.
         if candidate.parent_strategy_id is None:
             raise ValueError(f"replacement candidate has no parent: {candidate.candidate_id}")
         from .lineage import LineageRecord
@@ -48,11 +45,7 @@ def evaluate_replacements(
             parameters={"request_id": candidate.request_id, "candidate_id": candidate.candidate_id},
         )
         evaluation = evaluate_candidate(
-            Candidate(
-                strategy=candidate.strategy,
-                strategy_id=candidate.candidate_id,
-                lineage=lineage,
-            ),
+            Candidate(strategy=candidate.strategy, strategy_id=candidate.candidate_id, lineage=lineage),
             data,
             dataset_id,
             dataset_version,
@@ -61,12 +54,13 @@ def evaluate_replacements(
             validation_policy=validation_policy,
             promotion_policy=promotion_policy,
         )
+        if not evaluation.promotion.eligible:
+            evaluation = replace(
+                evaluation,
+                promotion=PromotionDecision(stage="reject", eligible=False, reasons=evaluation.promotion.reasons),
+            )
         evaluations.append(evaluation)
-    eligible = tuple(
-        evaluation.candidate_id
-        for evaluation in evaluations
-        if evaluation.promotion.eligible
-    )
+    eligible = tuple(evaluation.candidate_id for evaluation in evaluations if evaluation.promotion.eligible)
     return ReplacementEvaluationResult(
         request_id=research.request.request_id,
         evaluations=tuple(evaluations),
