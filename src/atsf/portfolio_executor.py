@@ -6,6 +6,7 @@ from math import isfinite
 import pandas as pd
 
 from .dataset_bundle import bundle_identity
+from .execution_manifest import execution_manifest
 from .paper import PaperBroker, PaperConfig
 from .portfolio_attribution import PortfolioAttribution
 from .portfolio_audit import PortfolioAuditEvent
@@ -126,6 +127,8 @@ def execute_persisted_portfolio(
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
 
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
+    manifest = execution_manifest(audit_events)
+    persisted_execution_config = {**execution_config, "ledger_fingerprint": manifest.ledger_fingerprint, "ledger_event_count": manifest.event_count}
     store.save_portfolio_execution(
         identity.run_id,
         portfolio_id,
@@ -137,7 +140,7 @@ def execute_persisted_portfolio(
         dataset_version=dataset_version,
         data_bundle_version=bundle.version,
         execution_fingerprint=identity.execution_fingerprint,
-        execution_config=execution_config,
+        execution_config=persisted_execution_config,
         audit_events=list(audit_events),
     )
     return PersistedPortfolioExecution(identity, paper, attribution, audit_events)
