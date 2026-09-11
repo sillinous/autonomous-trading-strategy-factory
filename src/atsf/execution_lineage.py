@@ -36,11 +36,15 @@ def build_fill_lineage(
     signals: dict[str, tuple[pd.Series, pd.Series]],
     *,
     halted: bool,
+    liquidation_timestamp: pd.Timestamp | None = None,
 ) -> tuple[FillLineage, ...]:
-    """Connect every persisted fill to the deterministic signal that authorized it."""
+    """Connect every persisted fill to its deterministic authorizing decision."""
     result: list[FillLineage] = []
+    halt_timestamp = pd.Timestamp(liquidation_timestamp) if liquidation_timestamp is not None else None
     for event in sorted(events, key=lambda item: item.sequence):
         timestamp = pd.Timestamp(event.timestamp)
+        if event.strategy_id not in signals:
+            raise ValueError(f"missing signals for strategy: {event.strategy_id}")
         entry, exit_ = signals[event.strategy_id]
         is_entry = bool(entry.get(timestamp, False))
         is_exit = bool(exit_.get(timestamp, False))
@@ -48,8 +52,10 @@ def build_fill_lineage(
             reason = "entry_signal"
         elif event.action == "sell" and is_exit:
             reason = "exit_signal"
+        elif event.action == "sell" and halted and halt_timestamp == timestamp:
+            reason = "risk_halt"
         elif event.action == "sell" and timestamp == entry.index[-1]:
-            reason = "risk_halt" if halted else "end_of_sample"
+            reason = "end_of_sample"
         else:
             raise ValueError(
                 f"fill at {event.timestamp} for {event.strategy_id} has no deterministic authorizing decision"
@@ -70,7 +76,13 @@ def verify_fill_lineage(
     signals: dict[str, tuple[pd.Series, pd.Series]],
     *,
     halted: bool,
+    liquidation_timestamp: pd.Timestamp | None = None,
 ) -> bool:
     """Verify that persisted lineage exactly matches deterministic strategy signals."""
-    expected = build_fill_lineage(events, signals, halted=halted)
+    expected = build_fill_lineage(
+        events,
+        signals,
+        halted=halted,
+        liquidation_timestamp=liquidation_timestamp,
+    )
     return expected == lineage
