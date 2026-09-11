@@ -1,8 +1,9 @@
 from datetime import datetime
+import json
 
 import pandas as pd
 
-from atsf.data_cache import CacheKey, MarketDataCache
+from atsf.data_cache import CacheKey, MarketDataCache, frame_fingerprint
 
 
 def frame() -> pd.DataFrame:
@@ -22,6 +23,8 @@ def test_cache_round_trip_is_deterministic(tmp_path):
     path = cache.put(key(), frame())
     restored = cache.get(key())
     assert path.exists()
+    assert cache.manifest_path_for(key).exists()
+    assert frame_fingerprint(restored) == frame_fingerprint(frame())
     pd.testing.assert_frame_equal(restored, frame())
 
 
@@ -34,3 +37,30 @@ def test_cache_key_changes_when_contract_changes():
 
 def test_cache_miss_returns_none(tmp_path):
     assert MarketDataCache(tmp_path).get(key()) is None
+
+
+def test_tampered_frame_is_rejected(tmp_path):
+    cache = MarketDataCache(tmp_path)
+    cache.put(key(), frame())
+    path = cache.path_for(key())
+    tampered = frame().copy()
+    tampered.iloc[0, tampered.columns.get_loc("close")] = 999.0
+    tampered.to_csv(path)
+    assert cache.get(key()) is None
+
+
+def test_tampered_manifest_is_rejected(tmp_path):
+    cache = MarketDataCache(tmp_path)
+    cache.put(key(), frame())
+    manifest_path = cache.manifest_path_for(key())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["frame_fingerprint"] = "tampered"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert cache.get(key()) is None
+
+
+def test_missing_manifest_is_a_cache_miss(tmp_path):
+    cache = MarketDataCache(tmp_path)
+    cache.put(key(), frame())
+    cache.manifest_path_for(key()).unlink()
+    assert cache.get(key()) is None
