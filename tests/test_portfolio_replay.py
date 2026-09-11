@@ -77,6 +77,23 @@ def test_replay_fails_closed_when_bundle_commitment_is_tampered() -> None:
     registry.close()
 
 
+def test_replay_fails_closed_when_final_equity_is_tampered() -> None:
+    registry = ExperimentRegistry()
+    result, _dataset_version, _bundle_version = execute(registry)
+    registry._connection.execute(
+        "UPDATE portfolio_runs SET final_equity = final_equity + 1 WHERE run_id = ?",
+        (result.identity.run_id,),
+    )
+    registry._connection.commit()
+
+    verification = verify_persisted_portfolio_run(registry, result.identity.run_id)
+
+    assert verification.valid is False
+    assert verification.reason is not None
+    assert "accounting mismatch" in verification.reason
+    registry.close()
+
+
 def test_persisted_execution_replay_rejects_missing_commitment() -> None:
     registry = ExperimentRegistry()
     _first, _second, dataset_version, bundle_version = seed_persisted_portfolio(registry)
