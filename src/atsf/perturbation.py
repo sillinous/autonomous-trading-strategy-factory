@@ -27,20 +27,27 @@ def evaluate_parameter_perturbations(
     samples: int = 20,
     seed: int = 0,
 ) -> PerturbationResult:
-    """Evaluate nearby constrained strategies using deterministic mutations."""
+    """Evaluate nearby constrained strategies using only applicable mutations."""
     if samples <= 0:
         raise ValueError("samples must be positive")
 
     rng = Random(seed)
-    mutations = (mutate_indicator_period, mutate_threshold) if strategy.indicators else (mutate_threshold,)
+    mutations: list[Callable[[StrategySpec, Random], StrategySpec]] = []
+    if strategy.indicators:
+        mutations.append(mutate_indicator_period)
+    if any(
+        isinstance(condition.right, (int, float)) and not isinstance(condition.right, bool)
+        for condition in strategy.entry.all
+    ):
+        mutations.append(mutate_threshold)
+    if not mutations:
+        raise ValueError("strategy has no perturbable parameters")
+
     scores: list[float] = []
     ids: list[str] = []
     for _ in range(samples):
         mutation = rng.choice(mutations)
-        try:
-            candidate = mutation(strategy, rng)
-        except (TypeError, ValueError):
-            candidate = mutate_threshold(strategy, rng)
+        candidate = mutation(strategy, rng)
         score = float(evaluator(candidate))
         scores.append(score)
         ids.append(strategy_id(candidate))
