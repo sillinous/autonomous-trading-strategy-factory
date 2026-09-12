@@ -8,6 +8,9 @@ from .lifecycle import (
     StrategyLifecycleStage,
     transition_promotion_stage,
 )
+from .paper_admission_record import build_admission_record
+from .paper_admission_store import PaperAdmissionStore
+from .registry import ExperimentRegistry
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,7 @@ class PaperAdmissionDecision:
     admitted: bool
     event: PromotionLifecycleEvent | None
     reasons: tuple[str, ...]
+    admission_id: str | None = None
 
 
 def admit_to_paper(
@@ -24,13 +28,13 @@ def admit_to_paper(
     run: dict[str, Any],
     certificate: dict[str, Any] | None,
     reason: str = "verified reproducibility evidence",
+    registry: ExperimentRegistry | None = None,
 ) -> PaperAdmissionDecision:
     """Fail-closed boundary from PROMOTED to PAPER.
 
-    A strategy may enter paper execution only when its lifecycle is explicitly
-    PROMOTED and the referenced portfolio execution has a persisted, verified
-    reproducibility certificate. No broker or live-execution capability is
-    involved in this gate.
+    When a registry is supplied, the admission is durably persisted before the
+    lifecycle event is returned. No broker or live-execution capability exists
+    in this boundary.
     """
     reasons: list[str] = []
     if source_stage is not StrategyLifecycleStage.PROMOTED:
@@ -53,10 +57,23 @@ def admit_to_paper(
                 reasons.append(f"certificate {field} is missing")
     if reasons:
         return PaperAdmissionDecision(False, None, tuple(reasons))
+
+    record = build_admission_record(
+        strategy_id,
+        str(run["run_id"]),
+        str(certificate["certificate_id"]),
+        reason=reason,
+    )
+    if registry is not None:
+        try:
+            PaperAdmissionStore(registry).save(record)
+        except (KeyError, ValueError) as exc:
+            return PaperAdmissionDecision(False, None, (str(exc),), record.admission_id)
+
     event = transition_promotion_stage(
         strategy_id,
         source_stage,
         StrategyLifecycleStage.PAPER,
         reason=reason,
     )
-    return PaperAdmissionDecision(True, event, ())
+    return PaperAdmissionDecision(True, event, (), record.admission_id)
