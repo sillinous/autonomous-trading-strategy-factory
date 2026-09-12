@@ -1,6 +1,13 @@
 import pandas as pd
+import pytest
 
-from atsf.lifecycle import StrategyLifecycle, StrategyState
+from atsf.lifecycle import (
+    StrategyLifecycle,
+    StrategyLifecycleStage,
+    StrategyState,
+    can_promote_stage,
+    transition_promotion_stage,
+)
 from atsf.monitoring import DegradationPolicy, assess_degradation
 
 
@@ -23,3 +30,43 @@ def test_lifecycle_halt_is_terminal():
     assert lifecycle.halt("another reason") == StrategyState.HALTED
     assert len(lifecycle.events) == 1
     assert not lifecycle.can_trade
+
+
+def test_promotion_lifecycle_allows_only_explicit_forward_or_safety_transitions():
+    assert can_promote_stage(StrategyLifecycleStage.RESEARCH, StrategyLifecycleStage.VALIDATED)
+    assert can_promote_stage(StrategyLifecycleStage.PROMOTED, StrategyLifecycleStage.PAPER)
+    assert can_promote_stage(StrategyLifecycleStage.PAPER, StrategyLifecycleStage.REPLACED)
+    assert not can_promote_stage(StrategyLifecycleStage.RESEARCH, StrategyLifecycleStage.PAPER)
+    assert not can_promote_stage(StrategyLifecycleStage.RETIRED, StrategyLifecycleStage.RESEARCH)
+
+    event = transition_promotion_stage(
+        "strategy-1",
+        StrategyLifecycleStage.PROMOTED,
+        StrategyLifecycleStage.PAPER,
+        reason="passed paper admission gate",
+    )
+    assert event.current == StrategyLifecycleStage.PAPER
+
+
+def test_promotion_lifecycle_rejects_invalid_or_empty_transition_metadata():
+    with pytest.raises(ValueError, match="invalid lifecycle transition"):
+        transition_promotion_stage(
+            "strategy-1",
+            StrategyLifecycleStage.RESEARCH,
+            StrategyLifecycleStage.PAPER,
+            reason="skip gates",
+        )
+    with pytest.raises(ValueError, match="strategy_id"):
+        transition_promotion_stage(
+            "",
+            StrategyLifecycleStage.RESEARCH,
+            StrategyLifecycleStage.VALIDATED,
+            reason="valid",
+        )
+    with pytest.raises(ValueError, match="reason"):
+        transition_promotion_stage(
+            "strategy-1",
+            StrategyLifecycleStage.RESEARCH,
+            StrategyLifecycleStage.VALIDATED,
+            reason="",
+        )
