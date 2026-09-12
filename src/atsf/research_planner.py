@@ -33,8 +33,9 @@ def build_research_plan(
     director_policy: ResearchDirectorPolicy | None = None,
     budget_policy: ResearchBudgetPolicy | None = None,
     population=None,
+    additional_signals: tuple[ResearchSignal, ...] = (),
 ) -> ResearchPlan:
-    """Translate generation evidence into prioritized, budgeted research work."""
+    """Translate generation and cross-cutting portfolio evidence into research work."""
     if population is None:
         population = result.survivors
     population = tuple(population)
@@ -72,6 +73,7 @@ def build_research_plan(
             )
         )
 
+    signals.extend(additional_signals)
     requests = prioritize(signals, policy=director_policy)
     request_ids = [request.request_id for request in requests]
     signal_by_key = {(signal.strategy_id, signal.reason): signal for signal in signals}
