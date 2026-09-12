@@ -46,7 +46,12 @@ def test_plan_is_prioritized_and_budgeted():
     assert len(plan.requests) == 2
     assert len(plan.allocations) == 2
     assert sum(item.units for item in plan.allocations) == 20
-    assert plan.requests[0].reason in {ResearchReason.DEGRADED, ResearchReason.CAPACITY}
+    assert {request.reason for request in plan.requests} >= {ResearchReason.DEGRADED}
+    assert plan.requests[0].reason in {
+        ResearchReason.DEGRADED,
+        ResearchReason.CAPACITY,
+        ResearchReason.DIVERSIFICATION,
+    }
 
 
 def test_plan_is_deterministic():
