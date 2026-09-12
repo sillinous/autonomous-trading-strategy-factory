@@ -17,3 +17,4 @@ jobs:
       # Keep the full deterministic suite and coverage gate as the hard CI contract.
       - run: pytest -q --cov=atsf --cov-report=term-missing --cov-fail-under=80
       - run: ruff check src tests
+      # Re-trigger CI after toolchain/lint configuration stabilization.
