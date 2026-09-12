@@ -4,7 +4,7 @@ from .feedback_loop import FeedbackAction, process_strategy_health
 from .lifecycle import StrategyLifecycle
 from .monitoring import DegradationReport
 from .paper_replay import verify_paper_replay
-from ..registry import ExperimentRegistry
+from .registry import ExperimentRegistry
 from .research_queue import ResearchQueue
 from .research_registry import ResearchRequestStore
 
