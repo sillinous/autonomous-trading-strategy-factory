@@ -90,7 +90,10 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str, data:
     except (KeyError, TypeError, ValueError) as exc: return _failure(run_id, f"execution ledger accounting mismatch: {exc}", actual)
     if data is not None:
         if set(data) != set(weights): return _failure(run_id, "replay market data members do not match persisted portfolio", actual)
-        dataset = store.require_dataset(str(portfolio["definition"]["dataset_id"]), stored_dataset_version)
+        try:
+            dataset = store.require_dataset(str(portfolio["definition"]["dataset_id"]), stored_dataset_version)
+        except (KeyError, TypeError, ValueError) as exc:
+            return _failure(run_id, f"replay market data dataset is unavailable: {exc}", actual)
         try: bundle = bundle_identity(data, str(portfolio["definition"]["dataset_id"]), source=dataset.source, timeframe=dataset.timeframe, schema_version=dataset.schema_version)
         except (TypeError, ValueError) as exc: return _failure(run_id, f"replay market data is invalid: {exc}", actual)
         if bundle.version != stored_bundle_version: return _failure(run_id, "replay market data does not match persisted data bundle", actual)
