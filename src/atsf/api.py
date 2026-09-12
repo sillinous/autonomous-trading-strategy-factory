@@ -152,12 +152,16 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.post("/runs/{run_id}/verify-replay", dependencies=[Auth])
     def verify_replay(run_id: str, request: ReplayVerificationRequest, store: ExperimentRegistry = Store) -> dict:
         try:
-            frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
             run = store.get_portfolio_run(run_id)
             if run is None:
                 raise HTTPException(status_code=404, detail="paper run not found")
             if run.get("provenance", {}).get("dataset_version") != request.dataset_version:
                 raise HTTPException(status_code=400, detail="dataset_version does not match persisted run")
+            try:
+                frames = {sid: validate_market_data(pd.DataFrame([bar.model_dump() for bar in bars]).set_index("timestamp")) for sid, bars in request.data.items()}
+            except (TypeError, ValueError) as exc:
+                baseline = verify_persisted_portfolio_run(store, run_id)
+                return {"run_id": run_id, "valid": False, "reason": f"replay market data is invalid: {exc}", "event_count": baseline.manifest.event_count, "ledger_fingerprint": baseline.manifest.ledger_fingerprint}
             verification = verify_persisted_portfolio_run(store, run_id, data=frames)
         except HTTPException:
             raise
