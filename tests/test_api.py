@@ -202,6 +202,24 @@ def test_paper_run_endpoint_executes_and_exposes_integrity_verification(monkeypa
     registry.close()
 
 
+def test_paper_replay_endpoint_exposes_admission_integrity(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    client = TestClient(create_app(registry))
+    response = client.post(
+        "/portfolios/portfolio-1/paper-runs",
+        json={"dataset_version": "v1", "data": {strategy_id: bars()}},
+    )
+    assert response.status_code == 201
+    run_id = response.json()["run_id"]
+    before_admission = client.get(f"/runs/{run_id}/paper-replay")
+    assert before_admission.status_code == 200
+    assert before_admission.json()["replayable"] is False
+    assert "paper admission is missing" in before_admission.json()["reasons"]
+    registry.close()
+
+
 def test_replay_verification_rejects_changed_market_data(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
@@ -222,7 +240,6 @@ def test_replay_verification_rejects_changed_market_data(monkeypatch):
     assert replay.status_code == 200
     assert replay.json()["valid"] is False
     assert "data bundle" in replay.json()["reason"]
-    registry.close()
 
 
 def test_paper_run_endpoint_rejects_unknown_portfolio_with_not_found(monkeypatch):
