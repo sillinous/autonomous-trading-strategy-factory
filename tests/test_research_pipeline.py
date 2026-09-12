@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from atsf.population import seed_population
 from atsf.research_budget import ResearchAllocation
-from atsf.research_pipeline import execute_research_plan
+from atsf.research_pipeline import evaluate_research_execution, execute_research_plan
 from atsf.research_planner import ResearchPlan
 from atsf.research_queue import ResearchReason, ResearchRequest
 from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
@@ -52,3 +54,34 @@ def test_execute_research_plan_rejects_non_integer_seed():
     population = tuple(seed_population([_strategy()]))
     with pytest.raises(TypeError, match="research seed"):
         execute_research_plan(_plan(population[0].strategy_id), population, seed="12")
+
+
+def test_evaluate_research_execution_uses_normal_candidate_gate(monkeypatch):
+    population = tuple(seed_population([_strategy()]))
+    execution = execute_research_plan(_plan(population[0].strategy_id), population, seed=12)
+    assert execution.candidates
+    calls = []
+
+    def fake_evaluate(candidate, data, dataset_id, dataset_version, **kwargs):
+        calls.append((candidate.strategy_id, dataset_id, dataset_version, kwargs["seed"]))
+        return SimpleNamespace(
+            candidate_id=candidate.strategy_id,
+            promotion=SimpleNamespace(eligible=candidate.strategy_id.endswith("0")),
+        )
+
+    monkeypatch.setattr("atsf.research_pipeline.evaluate_candidate", fake_evaluate)
+    result = evaluate_research_execution(
+        execution,
+        data=object(),
+        dataset_id="dataset",
+        dataset_version="v1",
+        seed=20,
+    )
+    assert len(calls) == len(execution.candidates)
+    assert [call[3] for call in calls] == list(range(20, 20 + len(calls)))
+    assert result.evaluations
+    assert result.eligible_strategy_ids == tuple(
+        evaluation.candidate_id
+        for evaluation in result.evaluations
+        if evaluation.promotion.eligible
+    )
