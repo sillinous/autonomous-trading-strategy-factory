@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 
 import pandas as pd
@@ -12,8 +12,8 @@ from .ranking import RankedCandidate
 
 @dataclass(frozen=True)
 class PortfolioIntelligencePolicy:
-    portfolio: PortfolioPolicy = PortfolioPolicy()
-    allocation: AllocationPolicy = AllocationPolicy()
+    portfolio: PortfolioPolicy = field(default_factory=PortfolioPolicy)
+    allocation: AllocationPolicy = field(default_factory=AllocationPolicy)
     max_portfolio_volatility: float = 0.25
 
     def __post_init__(self) -> None:
@@ -32,11 +32,14 @@ class PortfolioIntelligenceResult:
 
 
 def _portfolio_volatility(returns: pd.DataFrame, allocation: PortfolioAllocation) -> float:
-    ids = allocation.strategy_ids
+    ids = tuple(allocation.weights)
     if not ids:
         return 0.0
+    selected = returns[list(ids)].astype(float).replace([float("inf"), float("-inf")], float("nan")).dropna()
+    if len(selected) < 2:
+        raise ValueError("at least two finite return observations are required")
     weights = pd.Series(allocation.weights, index=ids, dtype=float)
-    covariance = returns[list(ids)].astype(float).cov().to_numpy(dtype=float)
+    covariance = selected[list(ids)].cov().to_numpy(dtype=float)
     variance = float(weights.to_numpy() @ covariance @ weights.to_numpy())
     if variance < 0 and variance > -1e-12:
         variance = 0.0
@@ -54,7 +57,7 @@ def build_portfolio_intelligence(
     *,
     policy: PortfolioIntelligencePolicy | None = None,
 ) -> PortfolioIntelligenceResult:
-    """Turn strategy rankings into a risk-aware portfolio admission decision."""
+    """Turn strategy rankings into a deterministic risk-aware portfolio admission decision."""
     policy = policy or PortfolioIntelligencePolicy()
     if not ranked:
         raise ValueError("ranked candidates cannot be empty")
@@ -69,10 +72,7 @@ def build_portfolio_intelligence(
     allocation = allocate_inverse_volatility(returns, selection.selected, policy.allocation)
     volatility = _portfolio_volatility(returns, allocation)
     passed = volatility <= policy.max_portfolio_volatility
-
-    rejected_for_risk: tuple[str, ...] = ()
-    if not passed:
-        rejected_for_risk = tuple(selection.selected)
+    rejected_for_risk = selection.selected if not passed else ()
 
     return PortfolioIntelligenceResult(
         ranked=ranked,
@@ -80,5 +80,5 @@ def build_portfolio_intelligence(
         allocation=allocation,
         portfolio_volatility=volatility,
         admission_passed=passed,
-        rejected_for_risk=rejected_for_risk,
+        rejected_for_risk=tuple(rejected_for_risk),
     )
