@@ -34,8 +34,6 @@ def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initia
         expected_fee = notional * commission_bps / 10_000.0
         if abs(event.fee - expected_fee) > tolerance * max(1.0, expected_fee):
             fee_mismatches.append((event, expected_fee))
-            if event.fee == 0 and expected_fee > 0:
-                raise ValueError("audit fill fee does not match execution configuration")
         if event.action == "sell":
             if event.quantity > positions[event.strategy_id] + tolerance:
                 raise ValueError("audit ledger contains a sell exceeding the strategy position")
