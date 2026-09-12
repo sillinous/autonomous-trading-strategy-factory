@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .control_plane import StrategyControlPlane
 from .feedback_loop import FeedbackAction, process_strategy_health
 from .lifecycle import StrategyLifecycle
 from .monitoring import DegradationReport
@@ -15,6 +16,7 @@ def process_paper_replay_health(
     lifecycle: StrategyLifecycle,
     queue: ResearchQueue,
     request_store: ResearchRequestStore | None = None,
+    control_plane: StrategyControlPlane | None = None,
 ) -> FeedbackAction | None:
     """Convert a failed durable PAPER replay into deterministic replacement research."""
     result = verify_paper_replay(registry, run_id)
@@ -33,4 +35,5 @@ def process_paper_replay_health(
         report,
         queue,
         request_store,
+        control_plane,
     )
