@@ -43,10 +43,12 @@ def validate_execution_ledger(events: tuple[PortfolioAuditEvent, ...], *, initia
             required = notional + event.fee
             if required > cash[event.strategy_id] + tolerance: raise ValueError("audit ledger contains a buy exceeding available strategy cash")
             cash[event.strategy_id] -= required; positions[event.strategy_id] += event.quantity
-    if fee_mismatches:
+    if any(event.fee == 0.0 for event in fee_mismatches):
         raise ValueError("audit fill fee does not match execution configuration")
     if any(abs(position) > tolerance for position in positions.values()):
         raise ValueError("audit ledger does not end flat")
+    if fee_mismatches:
+        raise ValueError("audit fill fee does not match execution configuration")
     ending_cash = sum(cash.values())
     if abs(ending_cash - final_equity) > tolerance * max(1.0, abs(final_equity)): raise ValueError("audit ledger cash does not reconcile to final equity")
     return LedgerState(ending_cash, positions)
