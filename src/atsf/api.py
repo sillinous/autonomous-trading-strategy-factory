@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
 from .feedback_registry import FeedbackEventStore
+from .paper_replay import verify_paper_replay
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
 from .provenance_graph import build_research_provenance_graph
@@ -148,6 +149,11 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"run_id": verification.run_id, "valid": verification.valid, "reason": verification.reason, "event_count": verification.manifest.event_count, "ledger_fingerprint": verification.manifest.ledger_fingerprint}
+
+    @app.get("/runs/{run_id}/paper-replay", dependencies=[Auth])
+    def paper_replay(run_id: str, store: ExperimentRegistry = Store) -> dict:
+        result = verify_paper_replay(store, run_id)
+        return {"replayable": result.replayable, "admission_id": result.admission_id, "strategy_id": result.strategy_id, "reasons": result.reasons}
 
     @app.post("/runs/{run_id}/verify-replay", dependencies=[Auth])
     def verify_replay(run_id: str, request: ReplayVerificationRequest, store: ExperimentRegistry = Store) -> dict:
