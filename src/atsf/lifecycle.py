@@ -12,6 +12,49 @@ class StrategyState(StrEnum):
     HALTED = "halted"
 
 
+class StrategyLifecycleStage(StrEnum):
+    RESEARCH = "research"
+    VALIDATED = "validated"
+    PROMOTED = "promoted"
+    PAPER = "paper"
+    DEGRADED = "degraded"
+    RETIRED = "retired"
+    REPLACED = "replaced"
+
+
+_PROMOTION_TRANSITIONS: dict[StrategyLifecycleStage, frozenset[StrategyLifecycleStage]] = {
+    StrategyLifecycleStage.RESEARCH: frozenset({StrategyLifecycleStage.VALIDATED, StrategyLifecycleStage.DEGRADED}),
+    StrategyLifecycleStage.VALIDATED: frozenset({StrategyLifecycleStage.PROMOTED, StrategyLifecycleStage.DEGRADED}),
+    StrategyLifecycleStage.PROMOTED: frozenset({StrategyLifecycleStage.PAPER, StrategyLifecycleStage.DEGRADED, StrategyLifecycleStage.RETIRED}),
+    StrategyLifecycleStage.PAPER: frozenset({StrategyLifecycleStage.DEGRADED, StrategyLifecycleStage.RETIRED, StrategyLifecycleStage.REPLACED}),
+    StrategyLifecycleStage.DEGRADED: frozenset({StrategyLifecycleStage.RESEARCH, StrategyLifecycleStage.RETIRED, StrategyLifecycleStage.REPLACED}),
+    StrategyLifecycleStage.RETIRED: frozenset(),
+    StrategyLifecycleStage.REPLACED: frozenset(),
+}
+
+
+@dataclass(frozen=True)
+class PromotionLifecycleEvent:
+    strategy_id: str
+    previous: StrategyLifecycleStage
+    current: StrategyLifecycleStage
+    reason: str
+
+
+def can_promote_stage(source: StrategyLifecycleStage, target: StrategyLifecycleStage) -> bool:
+    return target in _PROMOTION_TRANSITIONS[source]
+
+
+def transition_promotion_stage(strategy_id: str, source: StrategyLifecycleStage, target: StrategyLifecycleStage, *, reason: str) -> PromotionLifecycleEvent:
+    if not strategy_id.strip():
+        raise ValueError("strategy_id is required")
+    if not reason.strip():
+        raise ValueError("reason is required")
+    if not can_promote_stage(source, target):
+        raise ValueError(f"invalid lifecycle transition: {source.value} -> {target.value}")
+    return PromotionLifecycleEvent(strategy_id, source, target, reason)
+
+
 @dataclass(frozen=True)
 class LifecycleEvent:
     previous: StrategyState
