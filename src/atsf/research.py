@@ -18,6 +18,7 @@ from .ranking import rank_candidates
 from .registry import ExperimentRegistry
 from .research_budget import ResearchBudgetPolicy
 from .research_director import ResearchDirectorPolicy
+from .research_feedback import ResearchFeedbackResult, build_research_feedback
 from .research_planner import ResearchPlan, build_research_plan
 from .scheduler import GenerationResult, evolve_generation
 from .strategy import StrategySpec
@@ -31,6 +32,7 @@ class ResearchRunResult:
     dataset_version: str
     portfolio_id: str | None = None
     research_plans: tuple[ResearchPlan, ...] = ()
+    research_feedback: tuple[ResearchFeedbackResult, ...] = ()
 
 
 def _build_research_portfolio(
@@ -189,6 +191,7 @@ def run_research(
     store = registry or ExperimentRegistry()
     results: list[GenerationResult] = []
     research_plans: list[ResearchPlan] = []
+    research_feedback: list[ResearchFeedbackResult] = []
     portfolio_id: str | None = None
     try:
         store.register_dataset(registered_identity, source=source)
@@ -209,6 +212,12 @@ def run_research(
                 fitness_policy=fitness_policy,
             )
             results.append(result)
+            feedback = build_research_feedback(
+                result.evaluations,
+                generation=result.generation,
+                population=tuple(population),
+            )
+            research_feedback.append(feedback)
             plan = build_research_plan(
                 result,
                 director_policy=director_policy,
@@ -280,6 +289,22 @@ def run_research(
                                 for allocation in plan.allocations
                             },
                         },
+                        "research_feedback": {
+                            "generation": feedback.generation,
+                            "signals": [
+                                {
+                                    "strategy_id": signal.strategy_id,
+                                    "reason": signal.reason,
+                                    "fitness": signal.fitness,
+                                    "robustness": signal.robustness,
+                                    "novelty": signal.novelty,
+                                    "uncertainty": signal.uncertainty,
+                                    "capacity_gap": signal.capacity_gap,
+                                }
+                                for signal in feedback.signals
+                                if signal.strategy_id == evaluation.candidate_id
+                            ],
+                        },
                     },
                 )
             portfolio_id = _build_research_portfolio(
@@ -307,4 +332,5 @@ def run_research(
         dataset_version=registered_identity.version,
         portfolio_id=portfolio_id,
         research_plans=tuple(research_plans),
+        research_feedback=tuple(research_feedback),
     )
