@@ -16,6 +16,9 @@ from .portfolio import PortfolioPolicy
 from .portfolio_builder import build_portfolio
 from .ranking import rank_candidates
 from .registry import ExperimentRegistry
+from .research_budget import ResearchBudgetPolicy
+from .research_director import ResearchDirectorPolicy
+from .research_planner import ResearchPlan, build_research_plan
 from .scheduler import GenerationResult, evolve_generation
 from .strategy import StrategySpec
 
@@ -27,6 +30,7 @@ class ResearchRunResult:
     dataset_id: str
     dataset_version: str
     portfolio_id: str | None = None
+    research_plans: tuple[ResearchPlan, ...] = ()
 
 
 def _build_research_portfolio(
@@ -153,8 +157,10 @@ def run_research(
     dataset_id: str = "research",
     registry: ExperimentRegistry | None = None,
     fitness_policy: FitnessPolicy | None = None,
+    director_policy: ResearchDirectorPolicy | None = None,
+    budget_policy: ResearchBudgetPolicy | None = None,
 ) -> ResearchRunResult:
-    """Run deterministic evolutionary research and persist a portfolio when possible."""
+    """Run deterministic evolutionary research and persist portfolio/research plans."""
     if generations <= 0:
         raise ValueError("generations must be positive")
     if population_size <= 0 or survivor_count <= 0:
@@ -182,6 +188,7 @@ def run_research(
     owned_registry = registry is None
     store = registry or ExperimentRegistry()
     results: list[GenerationResult] = []
+    research_plans: list[ResearchPlan] = []
     portfolio_id: str | None = None
     try:
         store.register_dataset(registered_identity, source=source)
@@ -190,9 +197,7 @@ def run_research(
             store.save_strategy(candidate.strategy)
             store.save_lineage(candidate.lineage)
         for generation in range(generations):
-            candidates_by_id = {
-                candidate.strategy_id: candidate for candidate in population
-            }
+            candidates_by_id = {candidate.strategy_id: candidate for candidate in population}
             result = evolve_generation(
                 population,
                 data,
@@ -204,6 +209,13 @@ def run_research(
                 fitness_policy=fitness_policy,
             )
             results.append(result)
+            plan = build_research_plan(
+                result,
+                director_policy=director_policy,
+                budget_policy=budget_policy,
+                population=population,
+            )
+            research_plans.append(plan)
             for evaluation in result.evaluations:
                 candidate = candidates_by_id[evaluation.candidate_id]
                 spec = ExperimentSpec(
@@ -260,6 +272,14 @@ def run_research(
                             "eligible": evaluation.promotion.eligible,
                             "reasons": evaluation.promotion.reasons,
                         },
+                        "research_plan": {
+                            "generation": plan.generation,
+                            "requests": [request.request_id for request in plan.requests],
+                            "allocations": {
+                                allocation.request_id: allocation.units
+                                for allocation in plan.allocations
+                            },
+                        },
                     },
                 )
             portfolio_id = _build_research_portfolio(
@@ -286,4 +306,5 @@ def run_research(
         dataset_id=frame_identity.dataset_id,
         dataset_version=registered_identity.version,
         portfolio_id=portfolio_id,
+        research_plans=tuple(research_plans),
     )
