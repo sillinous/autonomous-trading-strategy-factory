@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .lifecycle import StrategyState
+from .lifecycle import StrategyLifecycle, StrategyState
 from .registry import ExperimentRegistry
 
 
@@ -79,6 +79,14 @@ class StrategyControlPlane:
         return StrategyControlRecord(
             strategy_id, StrategyState(row["state"]), row["reason"], row["sequence"]
         )
+
+    def restore(self, strategy_id: str, lifecycle: StrategyLifecycle) -> StrategyControlRecord | None:
+        """Restore durable health state into a fresh in-memory lifecycle without emitting a new event."""
+        record = self.get(strategy_id)
+        if record is None:
+            return None
+        lifecycle.state = record.state
+        return record
 
     def events(self, strategy_id: str) -> list[dict[str, object]]:
         rows = self.registry._connection.execute(
