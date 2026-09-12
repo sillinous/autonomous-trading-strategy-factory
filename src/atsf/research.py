@@ -288,6 +288,8 @@ def run_research(
             admissions: list[SuccessorAdmission] = []
             for evaluation in result.evaluations:
                 candidate = candidates_by_id[evaluation.candidate_id]
+                if not candidate.lineage.parent_ids:
+                    continue
                 admissions.append(
                     admit_successor(
                         candidate,
@@ -391,9 +393,12 @@ def run_research(
                         "successor_admission": {
                             "cycle_id": cycle_id,
                             "admitted": next(
-                                admission.admitted
-                                for admission in admissions
-                                if admission.candidate_id == evaluation.candidate_id
+                                (
+                                    admission.admitted
+                                    for admission in admissions
+                                    if admission.candidate_id == evaluation.candidate_id
+                                ),
+                                False,
                             ),
                         },
                     },
