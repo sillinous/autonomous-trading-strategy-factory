@@ -30,7 +30,7 @@ def test_genome_is_canonical_and_stable():
     first = StrategyGenome.from_strategy(strategy)
     second = StrategyGenome.from_strategy(strategy.model_copy(deep=True))
     assert first == second
-    assert first.strategy_id == 16 * first.strategy_id[0] or len(first.strategy_id) == 16
+    assert len(first.strategy_id) == 16
     assert first.as_dict() == second.as_dict()
 
 
