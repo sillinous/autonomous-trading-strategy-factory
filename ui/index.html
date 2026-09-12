@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ATSF Control Plane</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e7edf5;background:#0b1020}
+    *{box-sizing:border-box}body{margin:0}.shell{max-width:1200px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}.muted{color:#9aa8ba}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}.card{background:#121a2b;border:1px solid #26344c;border-radius:14px;padding:18px}.metric{font-size:30px;font-weight:700;margin-top:8px}.ok{color:#67d391}.bad{color:#ff7d7d}.warn{color:#f3c969}input,button{font:inherit;border-radius:9px;border:1px solid #34435c;padding:10px;background:#0d1525;color:inherit}button{cursor:pointer}button:hover{background:#18243a}.row{display:flex;gap:8px;flex-wrap:wrap}.wide{grid-column:1/-1}pre{white-space:pre-wrap;overflow:auto;max-height:420px;background:#0a0f1c;padding:14px;border-radius:10px}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#202d43;margin:2px}.error{color:#ff9b9b}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="top"><div><h1>ATSF Control Plane</h1><div class="muted">Autonomous research · validation · paper trading · evidence</div></div><div id="service" class="pill">checking service…</div></div>
+  <div class="card" style="margin-bottom:16px"><div class="row"><input id="base" value="http://127.0.0.1:8000" aria-label="API base URL"><input id="runId" placeholder="Paper run ID" aria-label="Paper run ID"><input id="strategyId" placeholder="Strategy ID" aria-label="Strategy ID"><button onclick="refresh()">Refresh</button></div></div>
+  <div class="grid">
+    <div class="card"><div class="muted">Service</div><div id="health" class="metric">—</div></div>
+    <div class="card"><div class="muted">Live execution</div><div id="live" class="metric">—</div></div>
+    <div class="card"><div class="muted">Replay integrity</div><div id="replay" class="metric">—</div></div>
+    <div class="card"><div class="muted">Paper run</div><div id="runStatus" class="metric">—</div></div>
+    <div class="card wide"><h2>Run</h2><pre id="run">Enter a run ID and refresh.</pre></div>
+    <div class="card wide"><h2>Reproducibility certificate</h2><pre id="certificate">—</pre></div>
+    <div class="card wide"><h2>Strategy feedback / replacement research</h2><pre id="feedback">Enter a strategy ID and refresh.</pre></div>
+    <div class="card wide"><h2>Provenance graph</h2><pre id="graph">Enter a run ID and refresh.</pre></div>
+  </div>
+  <p class="muted">This control plane is supervisory only. Live brokerage execution remains disabled.</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);const base=()=>$('base').value.replace(/\/$/,'');
+async function get(path){const r=await fetch(base()+path);if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json()}
+function show(id,value){$(id).textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
+async function refresh(){
+  try{const h=await get('/health');show('health',h.status);$('service').textContent='service online';$('service').className='pill ok'}catch(e){show('health','offline');$('service').textContent=e.message;$('service').className='pill bad';return}
+  try{const c=await get('/capabilities');show('live',c.live_execution_enabled?'ENABLED':'DISABLED');$('live').className='metric '+(c.live_execution_enabled?'bad':'ok')}catch(e){show('live',e.message)}
+  const run=$('runId').value.trim();
+  if(run){try{const r=await get('/runs/'+encodeURIComponent(run));show('run',r);show('runStatus',r.halted?'HALTED':'PAPER');const v=await get('/runs/'+encodeURIComponent(run)+'/certificate/verify');show('certificate',v);show('replay',v.valid?'VERIFIED':'FAILED');$('replay').className='metric '+(v.valid?'ok':'bad');const g=await get('/runs/'+encodeURIComponent(run)+'/provenance-graph');show('graph',g)}catch(e){show('run',e.message);show('certificate','—');show('graph','—');show('replay','ERROR');$('replay').className='metric bad'}}
+  const sid=$('strategyId').value.trim();if(sid){try{show('feedback',await get('/strategies/'+encodeURIComponent(sid)+'/feedback'))}catch(e){show('feedback',e.message)}}
+}
+refresh();
+</script>
+</body>
+</html>
