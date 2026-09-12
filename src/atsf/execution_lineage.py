@@ -41,6 +41,11 @@ def build_fill_lineage(events: tuple[PortfolioAuditEvent, ...], signals: dict[st
             reason = "risk_halt"
         elif event.action == "buy" and is_entry:
             reason = "entry_signal"
+        elif event.action == "buy" and len(entry.index) > 0 and timestamp == entry.index[0]:
+            # Portfolio paper execution deliberately establishes each sleeve at the
+            # first market observation. This is a deterministic execution decision,
+            # distinct from a later strategy-generated entry signal.
+            reason = "initial_allocation"
         elif event.action == "sell" and is_exit:
             reason = "exit_signal"
         elif event.action == "sell" and not halted and timestamp == entry.index[-1]:
