@@ -30,11 +30,9 @@ def evaluate_parameter_perturbations(
     """Evaluate nearby constrained strategies using deterministic mutations."""
     if samples <= 0:
         raise ValueError("samples must be positive")
-    if not strategy.indicators:
-        raise ValueError("strategy must contain indicators")
 
     rng = Random(seed)
-    mutations = (mutate_indicator_period, mutate_threshold)
+    mutations = (mutate_indicator_period, mutate_threshold) if strategy.indicators else (mutate_threshold,)
     scores: list[float] = []
     ids: list[str] = []
     for _ in range(samples):
@@ -42,7 +40,7 @@ def evaluate_parameter_perturbations(
         try:
             candidate = mutation(strategy, rng)
         except (TypeError, ValueError):
-            candidate = mutate_indicator_period(strategy, rng)
+            candidate = mutate_threshold(strategy, rng)
         score = float(evaluator(candidate))
         scores.append(score)
         ids.append(strategy_id(candidate))
