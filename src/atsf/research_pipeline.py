@@ -2,16 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pandas as pd
+
+from .fitness import FitnessPolicy
+from .orchestrator import CandidateEvaluation, evaluate_candidate
 from .population import Candidate
+from .promotion import PromotionPolicy
 from .research_executor import ResearchWorkItem, materialize_research_work, spawn_research_candidates
 from .research_planner import ResearchPlan
 from .research_queue import ResearchQueue
+from .validation import ValidationPolicy
 
 
 @dataclass(frozen=True)
 class ResearchExecutionResult:
     work_items: tuple[ResearchWorkItem, ...]
     candidates: tuple[Candidate, ...]
+
+
+@dataclass(frozen=True)
+class ResearchEvaluationResult:
+    execution: ResearchExecutionResult
+    evaluations: tuple[CandidateEvaluation, ...]
+    eligible_strategy_ids: tuple[str, ...]
 
 
 def execute_research_plan(
@@ -46,4 +59,43 @@ def execute_research_plan(
     return ResearchExecutionResult(
         work_items=work_items,
         candidates=tuple(spawned),
+    )
+
+
+def evaluate_research_execution(
+    execution: ResearchExecutionResult,
+    data: pd.DataFrame,
+    dataset_id: str,
+    dataset_version: str,
+    *,
+    seed: int = 0,
+    validation_policy: ValidationPolicy | None = None,
+    fitness_policy: FitnessPolicy | None = None,
+    promotion_policy: PromotionPolicy | None = None,
+) -> ResearchEvaluationResult:
+    """Evaluate spawned research candidates through the normal deterministic gates."""
+    if not isinstance(seed, int):
+        raise TypeError("research seed must be an integer")
+    evaluations: list[CandidateEvaluation] = []
+    for offset, candidate in enumerate(execution.candidates):
+        evaluation = evaluate_candidate(
+            candidate,
+            data,
+            dataset_id,
+            dataset_version,
+            seed=seed + offset,
+            validation_policy=validation_policy,
+            fitness_policy=fitness_policy,
+            promotion_policy=promotion_policy,
+        )
+        evaluations.append(evaluation)
+    eligible = tuple(
+        evaluation.candidate_id
+        for evaluation in evaluations
+        if evaluation.promotion.eligible
+    )
+    return ResearchEvaluationResult(
+        execution=execution,
+        evaluations=tuple(evaluations),
+        eligible_strategy_ids=eligible,
     )
