@@ -33,3 +33,5 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+select = ["E9", "F"]
+ignore = ["F401"]
