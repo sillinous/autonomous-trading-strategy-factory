@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
+from .control_plane import StrategyControlPlane
 from .lifecycle import StrategyLifecycle, StrategyState
 from .monitoring import DegradationReport
 from .research_queue import ResearchQueue, ResearchReason, ResearchRequest
@@ -22,13 +23,19 @@ def process_strategy_health(
     report: DegradationReport,
     queue: ResearchQueue,
     request_store: ResearchRequestStore | None = None,
+    control_plane: StrategyControlPlane | None = None,
 ) -> FeedbackAction:
     """Transition paper health and persist/enqueue deterministic replacement work."""
     if not strategy_id:
         raise ValueError("strategy_id cannot be empty")
 
+    if control_plane is not None:
+        control_plane.restore(strategy_id, lifecycle)
+
     previous = lifecycle.state
     state = lifecycle.apply(report)
+    if control_plane is not None and state != previous:
+        control_plane.record(strategy_id, state, "; ".join(report.reasons))
     if previous == StrategyState.ACTIVE and state == StrategyState.DEGRADED:
         request_id = sha256(
             f"{strategy_id}:degraded:{report.observations}:{','.join(report.reasons)}".encode()
