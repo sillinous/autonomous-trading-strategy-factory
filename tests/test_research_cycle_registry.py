@@ -11,6 +11,7 @@ from atsf.research_cycle_registry import ResearchCycleRegistry
 def test_cycle_registry_is_durable_and_ordered() -> None:
     connection = sqlite3.connect(":memory:")
     registry = ResearchCycleRegistry(connection)
+    assert registry.connection is connection
 
     first = registry.save_cycle(
         "cycle:b",
