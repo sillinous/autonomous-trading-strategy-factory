@@ -76,10 +76,7 @@ class MarketDataCache:
             index_freq = manifest.get("index_freq")
             if index_freq and len(restored) > 1:
                 offset = pd.tseries.frequencies.to_offset(index_freq)
-                try:
-                    restored.index = pd.DatetimeIndex(restored.index, freq=offset)
-                except (ValueError, TypeError):
-                    return None
+                restored.index = pd.DatetimeIndex(restored.index, freq=offset)
             if frame_fingerprint(restored) != manifest.get("frame_fingerprint"):
                 return None
             return restored.copy()
@@ -96,7 +93,7 @@ class MarketDataCache:
         normalized.to_csv(temp)
         manifest = {"cache_key": key.value, "frame_fingerprint": fingerprint, "rows": len(normalized),
                     "dtypes": [str(dtype) for dtype in normalized.dtypes],
-                    "index_freq": str(normalized.index.freq) if normalized.index.freq is not None else None}
+                    "index_freq": normalized.index.freqstr if normalized.index.freq is not None else None}
         manifest_temp.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         temp.replace(path)
         manifest_temp.replace(manifest_path)
