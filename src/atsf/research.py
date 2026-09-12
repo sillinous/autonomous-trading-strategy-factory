@@ -17,11 +17,13 @@ from .portfolio_builder import build_portfolio
 from .ranking import rank_candidates
 from .registry import ExperimentRegistry
 from .research_budget import ResearchBudgetPolicy
+from .research_cycle_registry import ResearchCycleRegistry
 from .research_director import ResearchDirectorPolicy
 from .research_feedback import ResearchFeedbackResult, build_research_feedback
 from .research_planner import ResearchPlan, build_research_plan
 from .scheduler import GenerationResult, evolve_generation
 from .strategy import StrategySpec
+from .successor import SuccessorAdmission, admit_successor
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,63 @@ def _build_research_portfolio(
     return portfolio_id
 
 
+def _cycle_payload(plan: ResearchPlan, feedback: ResearchFeedbackResult, admissions: tuple[SuccessorAdmission, ...]) -> tuple[str, dict, dict, list[dict]]:
+    plan_payload = {
+        "generation": plan.generation,
+        "requests": [
+            {
+                "request_id": request.request_id,
+                "reason": request.reason,
+                "priority": request.priority,
+                "source_strategy_id": request.source_strategy_id,
+            }
+            for request in plan.requests
+        ],
+        "allocations": [
+            {
+                "request_id": allocation.request_id,
+                "units": allocation.units,
+                "score": allocation.score,
+            }
+            for allocation in plan.allocations
+        ],
+    }
+    feedback_payload = {
+        "generation": feedback.generation,
+        "signals": [
+            {
+                "strategy_id": signal.strategy_id,
+                "reason": signal.reason,
+                "fitness": signal.fitness,
+                "robustness": signal.robustness,
+                "novelty": signal.novelty,
+                "uncertainty": signal.uncertainty,
+                "capacity_gap": signal.capacity_gap,
+            }
+            for signal in feedback.signals
+        ],
+    }
+    admissions_payload = [
+        {
+            "candidate_id": admission.candidate_id,
+            "parent_ids": list(admission.parent_ids),
+            "generation": admission.generation,
+            "admitted": admission.admitted,
+            "stage": admission.stage,
+            "reasons": list(admission.reasons),
+        }
+        for admission in admissions
+    ]
+    canonical = json.dumps(
+        {"plan": plan_payload, "feedback": feedback_payload, "admissions": admissions_payload},
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    cycle_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return cycle_id, plan_payload, feedback_payload, admissions_payload
+
+
 def run_research(
     seeds: list[StrategySpec],
     data: pd.DataFrame,
@@ -162,7 +221,7 @@ def run_research(
     director_policy: ResearchDirectorPolicy | None = None,
     budget_policy: ResearchBudgetPolicy | None = None,
 ) -> ResearchRunResult:
-    """Run deterministic evolutionary research and persist portfolio/research plans."""
+    """Run deterministic evolutionary research and persist portfolio/research cycles."""
     if generations <= 0:
         raise ValueError("generations must be positive")
     if population_size <= 0 or survivor_count <= 0:
@@ -189,6 +248,7 @@ def run_research(
 
     owned_registry = registry is None
     store = registry or ExperimentRegistry()
+    cycle_store = ResearchCycleRegistry(store._connection)
     results: list[GenerationResult] = []
     research_plans: list[ResearchPlan] = []
     research_feedback: list[ResearchFeedbackResult] = []
@@ -225,6 +285,29 @@ def run_research(
                 population=population,
             )
             research_plans.append(plan)
+            admissions: list[SuccessorAdmission] = []
+            for evaluation in result.evaluations:
+                candidate = candidates_by_id[evaluation.candidate_id]
+                admissions.append(
+                    admit_successor(
+                        candidate,
+                        evaluation,
+                        generation=result.generation,
+                        existing_ids=frozenset(),
+                    )
+                )
+            cycle_id, plan_payload, feedback_payload, admissions_payload = _cycle_payload(
+                plan,
+                feedback,
+                tuple(admissions),
+            )
+            cycle_store.save_cycle(
+                cycle_id,
+                result.generation,
+                plan=plan_payload,
+                feedback=feedback_payload,
+                admissions=admissions_payload,
+            )
             for evaluation in result.evaluations:
                 candidate = candidates_by_id[evaluation.candidate_id]
                 spec = ExperimentSpec(
@@ -304,6 +387,14 @@ def run_research(
                                 for signal in feedback.signals
                                 if signal.strategy_id == evaluation.candidate_id
                             ],
+                        },
+                        "successor_admission": {
+                            "cycle_id": cycle_id,
+                            "admitted": next(
+                                admission.admitted
+                                for admission in admissions
+                                if admission.candidate_id == evaluation.candidate_id
+                            ),
                         },
                     },
                 )
