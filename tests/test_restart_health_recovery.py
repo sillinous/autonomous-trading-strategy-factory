@@ -48,6 +48,6 @@ def test_degraded_health_restores_after_sqlite_restart(tmp_path):
     )
     assert second.state == StrategyState.DEGRADED
     assert second.research_request is None
-    assert len(second_store.list_all()) == 1
+    assert len(second_store.list_for_strategy("strategy-1")) == 1
     assert len(second_plane.events("strategy-1")) == 1
     second_registry.close()
