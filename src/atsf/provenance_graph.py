@@ -149,6 +149,29 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             raise ValueError(f"ineligible experiment selected into portfolio: {experiment_id}")
         edges.append(ProvenanceEdge(f"__strategy__strategy:{strategy_id}", experiment_node.node_id, "tested"))
 
+    # Successor strategies are part of the research lineage even before they are
+    # promoted into a portfolio. Discover and validate them before materializing
+    # strategy/lineage nodes so their definitions can be linked deterministically.
+    feedback_store = FeedbackEventStore(store)
+    request_store = ResearchRequestStore(store)
+    successor_store = SuccessorCandidateStore(store)
+    for source_strategy_id in sorted(strategy_ids):
+        for payload in feedback_store.list_for_strategy(source_strategy_id):
+            request_id = payload.get("research_request_id")
+            if request_id is None:
+                continue
+            request = request_store.get(str(request_id))
+            if request is None or request.source_strategy_id != source_strategy_id:
+                continue
+            for row in successor_store.list_for_request(request.request_id):
+                candidate_id = str(row["candidate_id"])
+                candidate_strategy_id = str(row["strategy_id"])
+                if str(row["request_id"]) != request.request_id:
+                    raise ValueError(f"successor request mismatch: {candidate_id}")
+                if store.get_strategy(candidate_strategy_id) is None or store.get_lineage(candidate_strategy_id) is None:
+                    raise ValueError(f"successor strategy is absent: {candidate_id}")
+                strategy_ids.add(candidate_strategy_id)
+
     lineage_nodes, lineage_edges = _lineage_nodes(store, strategy_ids)
     nodes.update({f"strategy:{key}": value for key, value in lineage_nodes.items() if not key.startswith("lineage:")})
     nodes.update({key: value for key, value in lineage_nodes.items() if key.startswith("lineage:")})
@@ -165,9 +188,6 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             source = strategy_node.node_id
         normalized_edges.append(ProvenanceEdge(source, edge.target, edge.relation))
 
-    feedback_store = FeedbackEventStore(store)
-    request_store = ResearchRequestStore(store)
-    successor_store = SuccessorCandidateStore(store)
     for strategy_id in sorted(strategy_ids):
         for event_payload in feedback_store.list_for_strategy(strategy_id):
             try:
@@ -247,15 +267,13 @@ def build_research_provenance_graph(store: ExperimentRegistry, run: dict[str, An
             raise ValueError(f"fill lineage references unknown audit event: {item['event_id']}")
         normalized_edges.append(_edge(audit_node, lineage_node, "explained_by"))
 
-    manifest = _node("execution_manifest", run_id, {"event_count": config.get("ledger_event_count"), "ledger_fingerprint": config.get("ledger_fingerprint")})
-    nodes[f"manifest:{run_id}"] = manifest
-    normalized_edges.append(_edge(root, manifest, "attested_by"))
-    verification_node = _node("replay_verification", run_id, {"run_id": run_id, "verified": True, "ledger_fingerprint": config.get("ledger_fingerprint")})
-    nodes[f"verification:{run_id}"] = verification_node
-    normalized_edges.append(_edge(verification_node, root, "verifies"))
+    certificate = store.get_reproducibility_certificate(run_id)
+    if certificate is not None:
+        certificate_node = _node("certificate", str(certificate["certificate_id"]), certificate)
+        nodes[f"certificate:{certificate['certificate_id']}"] = certificate_node
+        normalized_edges.append(_edge(root, certificate_node, "certified_by"))
 
-    ordered_nodes = tuple(sorted(nodes.values(), key=lambda node: (node.kind, node.key, node.node_id)))
-    ordered_edges = tuple(sorted(set(normalized_edges), key=lambda edge: (edge.source, edge.target, edge.relation)))
-    payload = {"schema_version": PROVENANCE_GRAPH_SCHEMA_VERSION, "nodes": [{"node_id": n.node_id, "kind": n.kind, "key": n.key, "attributes": n.attributes} for n in ordered_nodes], "edges": [e.__dict__ for e in ordered_edges]}
-    fingerprint = hashlib.sha256(_canonical(payload).encode()).hexdigest()[:24]
+    ordered_nodes = tuple(sorted(nodes.values(), key=lambda item: (item.kind, item.key)))
+    ordered_edges = tuple(sorted(normalized_edges, key=lambda item: (item.source, item.target, item.relation)))
+    fingerprint = hashlib.sha256(_canonical({"schema_version": PROVENANCE_GRAPH_SCHEMA_VERSION, "nodes": [node.__dict__ for node in ordered_nodes], "edges": [edge.__dict__ for edge in ordered_edges]}).encode()).hexdigest()
     return ResearchProvenanceGraph(PROVENANCE_GRAPH_SCHEMA_VERSION, ordered_nodes, ordered_edges, fingerprint)
