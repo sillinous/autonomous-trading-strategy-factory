@@ -47,20 +47,34 @@ def crossover_candidate(parent_a: Candidate, parent_b: Candidate, rng: Random) -
     return Candidate(strategy=strategy, strategy_id=candidate_id, lineage=lineage)
 
 
+def _applicable_mutations(candidate: Candidate) -> tuple:
+    strategy = candidate.strategy
+    operators = []
+    if strategy.indicators:
+        operators.append(mutate_indicator_period)
+    conditions = tuple(strategy.entry.all)
+    if any(
+        isinstance(condition.right, (int, float)) and not isinstance(condition.right, bool)
+        for condition in conditions
+    ):
+        operators.append(mutate_threshold)
+    if conditions:
+        operators.append(mutate_signal_comparator)
+    if (
+        strategy.position_sizing.method == "fixed_fraction"
+        and min(strategy.position_sizing.max_position, strategy.risk.max_position) > 0
+    ):
+        operators.append(mutate_position_fraction)
+    return tuple(operators)
+
+
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
-    operators = (
-        mutate_indicator_period,
-        mutate_threshold,
-        mutate_signal_comparator,
-        mutate_position_fraction,
-    )
+    operators = _applicable_mutations(candidate)
+    if not operators:
+        raise ValueError("strategy has no applicable mutation operators")
     mutation = rng.choice(operators)
-    try:
-        strategy = mutation(candidate.strategy, rng)
-        operator = mutation.__name__
-    except (TypeError, ValueError):
-        strategy = mutate_indicator_period(candidate.strategy, rng)
-        operator = mutate_indicator_period.__name__
+    strategy = mutation(candidate.strategy, rng)
+    operator = mutation.__name__
     candidate_id = strategy_id(strategy)
     lineage = LineageRecord(
         strategy_id=candidate_id,
