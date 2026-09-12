@@ -71,13 +71,18 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     reserve = initial_cash * (1.0 - total_weight)
     snapshots: list[PortfolioPaperSnapshot] = []
     fills: list[tuple[str, PaperFill]] = []
-    for timestamp in reference_index:
+    for timestamp_index, timestamp in enumerate(reference_index):
         equity = reserve
         for strategy_id, broker in brokers.items():
             frame = data[strategy_id]
             price = float(frame.loc[timestamp, "close"])
             entry, exit_ = signals[strategy_id]
-            if bool(entry.loc[timestamp]) and broker.position == 0:
+            if timestamp_index == 0 and broker.position == 0 and broker.cash > 0:
+                desired = broker.cash * strategies[strategy_id].position_sizing.max_position / price
+                quantity = min(desired, broker.max_affordable_quantity(price))
+                if quantity > 0:
+                    fills.append((strategy_id, broker.execute(timestamp, "buy", quantity, price)))
+            elif bool(entry.loc[timestamp]) and broker.position == 0:
                 desired = broker.cash * strategies[strategy_id].position_sizing.max_position / price
                 quantity = min(desired, broker.max_affordable_quantity(price))
                 if quantity > 0:
