@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from random import Random
 
-from .genome import StrategyGenome
-from .generator import mutate_indicator_period, mutate_position_fraction, mutate_signal_comparator, mutate_threshold
+from .genome import StrategyGenome, crossover
+from .generator import (
+    mutate_indicator_period,
+    mutate_position_fraction,
+    mutate_signal_comparator,
+    mutate_threshold,
+)
 from .lineage import LineageRecord
 from .strategy import StrategySpec
 
@@ -25,8 +30,30 @@ def strategy_id(strategy: StrategySpec) -> str:
     return StrategyGenome.from_strategy(strategy).strategy_id
 
 
+def crossover_candidate(parent_a: Candidate, parent_b: Candidate, rng: Random) -> Candidate:
+    """Create a two-parent candidate and record explicit crossover lineage."""
+    if parent_a.strategy_id == parent_b.strategy_id:
+        raise ValueError("crossover requires two distinct parents")
+    strategy = crossover(parent_a.strategy, parent_b.strategy, rng)
+    candidate_id = strategy_id(strategy)
+    if candidate_id in {parent_a.strategy_id, parent_b.strategy_id}:
+        raise ValueError("crossover produced a parent-identical strategy")
+    lineage = LineageRecord(
+        strategy_id=candidate_id,
+        generation=max(parent_a.lineage.generation, parent_b.lineage.generation) + 1,
+        parent_ids=(parent_a.strategy_id, parent_b.strategy_id),
+        operator="crossover",
+    )
+    return Candidate(strategy=strategy, strategy_id=candidate_id, lineage=lineage)
+
+
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
-    operators = (mutate_indicator_period, mutate_threshold, mutate_signal_comparator, mutate_position_fraction)
+    operators = (
+        mutate_indicator_period,
+        mutate_threshold,
+        mutate_signal_comparator,
+        mutate_position_fraction,
+    )
     mutation = rng.choice(operators)
     try:
         strategy = mutation(candidate.strategy, rng)
