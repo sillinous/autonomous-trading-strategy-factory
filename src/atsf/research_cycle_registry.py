@@ -22,6 +22,11 @@ class ResearchCycleRegistry:
         self._connection = connection
         self._create_schema()
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Return the shared connection for coordinated persistence operations."""
+        return self._connection
+
     def _create_schema(self) -> None:
         self._connection.executescript(
             """
