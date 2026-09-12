@@ -7,7 +7,7 @@ import pandas as pd
 
 from .fitness import FitnessPolicy
 from .orchestrator import CandidateEvaluation, evaluate_candidate
-from .population import Candidate, mutate_candidate
+from .population import Candidate, crossover_candidate, mutate_candidate
 from .ranking import diversity_score, rank_candidates
 
 
@@ -91,14 +91,17 @@ def evolve_generation(
     survivor_count: int,
     seed: int = 0,
     fitness_policy: FitnessPolicy | None = None,
+    crossover_rate: float = 0.25,
 ) -> GenerationResult:
-    """Evaluate, rank, retain, and mutate one research-only generation."""
+    """Evaluate and create one research-only generation via mutation and crossover."""
     if not population:
         raise ValueError("population must not be empty")
     if target_size <= 0 or survivor_count <= 0:
         raise ValueError("population sizes must be positive")
     if survivor_count > target_size:
         raise ValueError("survivor_count cannot exceed target_size")
+    if not 0.0 <= crossover_rate <= 1.0:
+        raise ValueError("crossover_rate must be between 0 and 1")
 
     evaluations = tuple(
         evaluate_candidate(
@@ -113,7 +116,7 @@ def evolve_generation(
     )
     survivors = _select_survivors(population, evaluations, survivor_count)
     if not survivors:
-        raise RuntimeError("no survivors available for mutation")
+        raise RuntimeError("no survivors available for evolution")
 
     rng = Random(seed)
     next_population = list(survivors)
@@ -121,9 +124,15 @@ def evolve_generation(
     attempts = 0
     max_attempts = max(100, target_size * 100)
     while len(next_population) < target_size and attempts < max_attempts:
-        parent = rng.choice(survivors)
-        child = mutate_candidate(parent, rng)
         attempts += 1
+        if len(survivors) >= 2 and rng.random() < crossover_rate:
+            parent_a, parent_b = rng.sample(survivors, 2)
+            try:
+                child = crossover_candidate(parent_a, parent_b, rng)
+            except ValueError:
+                child = mutate_candidate(rng.choice(survivors), rng)
+        else:
+            child = mutate_candidate(rng.choice(survivors), rng)
         if child.strategy_id in seen:
             continue
         seen.add(child.strategy_id)
