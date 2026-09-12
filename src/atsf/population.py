@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from random import Random
 
+from .genome import StrategyGenome
 from .generator import mutate_indicator_period, mutate_position_fraction, mutate_signal_comparator, mutate_threshold
 from .lineage import LineageRecord
 from .strategy import StrategySpec
@@ -23,8 +22,7 @@ class Candidate:
 
 
 def strategy_id(strategy: StrategySpec) -> str:
-    payload = json.dumps(strategy.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return StrategyGenome.from_strategy(strategy).strategy_id
 
 
 def mutate_candidate(candidate: Candidate, rng: Random) -> Candidate:
