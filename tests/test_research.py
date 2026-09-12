@@ -60,6 +60,8 @@ def test_research_run_is_reproducible():
     ]
     assert len(first.generations) == 2
     assert all(len(result.next_population) == 4 for result in first.generations)
+    assert first.research_feedback == second.research_feedback
+    assert len(first.research_feedback) == 2
 
 
 def test_research_persists_experiment_evidence_and_dataset():
@@ -88,6 +90,7 @@ def test_research_persists_experiment_evidence_and_dataset():
     assert "perturbation" in evidence
     assert "regime" in evidence
     assert "promotion" in evidence
+    assert "research_feedback" in evidence
     assert result.dataset_id == "fixture-prices"
     registry.close()
 
