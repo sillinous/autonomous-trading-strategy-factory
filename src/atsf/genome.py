@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any
 
-from .strategy import Condition, Indicator, StrategySpec
+from .strategy import StrategySpec
 
 
 @dataclass(frozen=True)
@@ -29,10 +29,12 @@ class StrategyGenome:
 
     def distance(self, other: StrategyGenome) -> float:
         """Return normalized structural distance in [0, 1]."""
-        keys = set(self.as_dict()) | set(other.as_dict())
+        left = self.as_dict()
+        right = other.as_dict()
+        keys = set(left) | set(right)
         if not keys:
             return 0.0
-        different = sum(self.as_dict().get(key) != other.as_dict().get(key) for key in keys)
+        different = sum(left.get(key) != right.get(key) for key in keys)
         return different / len(keys)
 
 
@@ -73,7 +75,6 @@ def _choose_signal(a: dict[str, Any], b: dict[str, Any], rng: Random) -> dict[st
         return a
     selected = left if not right or (left and rng.random() < 0.5) else right
     condition = rng.choice(selected)
-    # Keep a valid signal shape while crossing one condition at a time.
     return {"all": [condition], "any": []}
 
 
