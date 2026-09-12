@@ -1,4 +1,5 @@
-from atsf.feedback_loop import process_strategy_health
+import pytest
+
 from atsf.lifecycle import StrategyLifecycle, StrategyState
 from atsf.paper_replay_feedback import process_paper_replay_health
 from atsf.research_queue import ResearchQueue, ResearchReason
@@ -6,12 +7,15 @@ from atsf.research_registry import ResearchRequestStore
 from atsf.registry import ExperimentRegistry
 
 
-def test_failed_paper_replay_creates_replacement_research():
+def test_missing_paper_replay_identity_fails_closed():
     registry = ExperimentRegistry()
     queue = ResearchQueue()
     lifecycle = StrategyLifecycle()
-    action = process_paper_replay_health(registry, "missing-run", lifecycle, queue)
-    assert action is None
+    with pytest.raises(ValueError, match="no strategy identity"):
+        process_paper_replay_health(registry, "missing-run", lifecycle, queue)
+    assert lifecycle.state == StrategyState.ACTIVE
+    assert len(queue) == 0
+    registry.close()
 
 
 def test_failed_paper_replay_with_identity_degrades_and_enqueues():
