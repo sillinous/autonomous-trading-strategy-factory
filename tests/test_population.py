@@ -1,12 +1,14 @@
 from random import Random
 
+import pytest
+
 from atsf.generator import (
     mutate_indicator_period,
     mutate_position_fraction,
     mutate_signal_comparator,
     mutate_threshold,
 )
-from atsf.population import mutate_candidate, seed_population, strategy_id
+from atsf.population import crossover_candidate, mutate_candidate, seed_population, strategy_id
 from atsf.strategy import (
     Comparator,
     Condition,
@@ -50,6 +52,32 @@ def test_mutation_advances_generation_and_parentage():
     assert child.lineage.generation == 1
     assert child.lineage.parent_ids == (parent.strategy_id,)
     assert child.strategy_id != parent.strategy_id
+
+
+def test_crossover_records_two_parents_and_is_reproducible():
+    first = make_strategy()
+    second = make_strategy().model_copy(
+        update={
+            "name": "alternate",
+            "indicators": [Indicator(name="ema", period=10)],
+            "entry": Signal(all=[Condition(left="close", comparator=Comparator.GT, right=110)]),
+        }
+    )
+    parent_a, parent_b = seed_population([first, second])
+    child_a = crossover_candidate(parent_a, parent_b, Random(21))
+    child_b = crossover_candidate(parent_a, parent_b, Random(21))
+    assert child_a.strategy == child_b.strategy
+    assert child_a.strategy_id == child_b.strategy_id
+    assert child_a.strategy_id not in {parent_a.strategy_id, parent_b.strategy_id}
+    assert child_a.lineage.generation == 1
+    assert child_a.lineage.parent_ids == (parent_a.strategy_id, parent_b.strategy_id)
+    assert child_a.lineage.operator == "crossover"
+
+
+def test_crossover_requires_distinct_parents():
+    parent = seed_population([make_strategy()])[0]
+    with pytest.raises(ValueError, match="distinct parents"):
+        crossover_candidate(parent, parent, Random(1))
 
 
 def test_each_mutation_operator_changes_the_strategy():
