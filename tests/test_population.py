@@ -117,3 +117,17 @@ def test_position_mutation_respects_risk_ceiling():
     )
     mutated = mutate_position_fraction(strategy, Random(9))
     assert mutated.position_sizing.value <= 0.25
+
+
+def test_mutation_fails_closed_when_no_operator_is_applicable():
+    strategy = make_strategy().model_copy(
+        update={
+            "indicators": [],
+            "entry": Signal(all=[]),
+            "position_sizing": PositionSizing(method="fixed_fraction", value=0.0, max_position=0.0),
+            "risk": RiskLimits(max_position=0.0),
+        }
+    )
+    parent = seed_population([strategy])[0]
+    with pytest.raises(ValueError, match="no applicable mutation operators"):
+        mutate_candidate(parent, Random(3))
