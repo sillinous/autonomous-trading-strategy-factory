@@ -5,8 +5,8 @@ from atsf.paper_admission_store import PaperAdmissionStore
 from atsf.registry import ExperimentRegistry
 
 
-def _registry_with_run() -> ExperimentRegistry:
-    registry = ExperimentRegistry()
+def _registry_with_run(path=":memory:") -> ExperimentRegistry:
+    registry = ExperimentRegistry(path)
     registry._connection.execute(
         "INSERT INTO portfolios(portfolio_id, definition_json) VALUES (?, ?)",
         ("portfolio-1", "{}"),
@@ -48,3 +48,17 @@ def test_paper_admission_store_rejects_halted_run():
     store.save(build_admission_record("strategy-1", "run-1", "cert-1"))
 
     assert store.verify("run-1") is False
+
+
+def test_paper_admission_survives_registry_restart(tmp_path):
+    path = tmp_path / "atsf.sqlite3"
+    first = _registry_with_run(path)
+    record = build_admission_record("strategy-1", "run-1", "cert-1")
+    PaperAdmissionStore(first).save(record)
+    first.close()
+
+    reopened = ExperimentRegistry(path)
+    store = PaperAdmissionStore(reopened)
+    assert store.get("run-1") == record
+    assert store.get("run-1").admission_id == record.admission_id
+    reopened.close()
