@@ -4,6 +4,7 @@ from atsf.fitness import FitnessPolicy
 from atsf.population import seed_population
 from atsf.registry import ExperimentRegistry
 from atsf.research import run_research
+from atsf.research_cycle_registry import ResearchCycleRegistry
 from atsf.strategy import (
     Comparator,
     Condition,
@@ -91,7 +92,12 @@ def test_research_persists_experiment_evidence_and_dataset():
     assert "regime" in evidence
     assert "promotion" in evidence
     assert "research_feedback" in evidence
+    assert "successor_admission" in evidence
     assert result.dataset_id == "fixture-prices"
+    cycles = ResearchCycleRegistry(registry._connection).list_cycles()
+    assert len(cycles) == 1
+    assert cycles[0].generation == result.generations[0].generation
+    assert cycles[0].cycle_id
     registry.close()
 
 
