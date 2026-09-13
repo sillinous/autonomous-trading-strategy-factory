@@ -55,7 +55,7 @@ def test_paper_admission_api_requires_verified_certificate_and_persists_admissio
     assert "certificate" in str(before_certificate.json()["detail"]).lower()
 
     certificate = client.post(f"/runs/{run_id}/certificate", json={"dataset_version": "v1", "data": {strategy_id: bars()}})
-    assert certificate.status_code == 200
+    assert certificate.status_code == 200, certificate.json()
 
     admission = client.post(f"/runs/{run_id}/paper-admission", json={"strategy_id": strategy_id})
     assert admission.status_code == 200
