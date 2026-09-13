@@ -89,9 +89,11 @@ def admit_to_paper(
             )
         if persisted is None:
             return PaperAdmissionDecision(False, None, ("persisted lifecycle state is missing",), record.admission_id)
-        lifecycle.transition(strategy_id, source_stage, StrategyLifecycleStage.PAPER, reason=reason)
+        lifecycle.transition(strategy_id, source_stage, StrategyLifecycleStage.PAPER, reason=reason, commit=False)
         admissions.save(record)
     except (KeyError, ValueError) as exc:
+        if registry._connection.in_transaction:
+            registry._connection.rollback()
         return PaperAdmissionDecision(False, None, (str(exc),), record.admission_id)
 
     event = transition_promotion_stage(
