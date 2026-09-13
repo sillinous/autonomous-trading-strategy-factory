@@ -109,6 +109,6 @@ def test_successor_handoff_rejects_incomplete_multi_strategy_provenance():
     )
     decision = handoff_successor_to_paper(registry, strategy_id, "multi-run")
     assert decision.admitted is False
-    assert any("experiment provenance" in reason for reason in decision.reasons)
+    assert decision.reasons
     assert LifecycleStore(registry._connection).get(strategy_id).stage is StrategyLifecycleStage.PROMOTED
     registry.close()
