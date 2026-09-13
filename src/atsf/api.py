@@ -14,7 +14,6 @@ from .data import dataset_identity, validate_market_data
 from .feedback_registry import FeedbackEventStore
 from .lifecycle import StrategyLifecycleStage
 from .paper_admission import admit_to_paper
-from .paper_admission_store import PaperAdmissionStore
 from .paper_replay import verify_paper_replay
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
@@ -180,8 +179,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         evidence = store.get_evaluation_evidence(experiment_id)
         if evidence is None or not isinstance(evidence.get("promotion"), dict):
             raise HTTPException(status_code=409, detail="promotion evidence is missing")
-        promotion = evidence["promotion"]
-        source = str(promotion.get("stage", "")).upper()
+        source = str(evidence["promotion"].get("stage", "")).lower()
         if source != StrategyLifecycleStage.PROMOTED.value:
             raise HTTPException(status_code=409, detail="strategy is not in promoted lifecycle stage")
         certificate = store.get_reproducibility_certificate(run_id)
