@@ -29,13 +29,7 @@ def handoff_successor_to_paper(
     *,
     reason: str = "verified successor reproducibility handoff",
 ) -> SuccessorPaperHandoffDecision:
-    """Verify successor provenance and paper-run integrity before PAPER admission.
-
-    The current PaperAdmissionStore keys admissions by ``run_id``. Therefore this
-    boundary intentionally permits only a single-member portfolio run. Rejecting
-    multi-strategy runs here prevents a second strategy from overwriting or
-    colliding with the durable admission record.
-    """
+    """Verify successor provenance and paper-run integrity before PAPER admission."""
     reasons: list[str] = []
     if not strategy_id.strip():
         reasons.append("strategy_id is required")
@@ -51,9 +45,9 @@ def handoff_successor_to_paper(
     except ValueError as exc:
         return SuccessorPaperHandoffDecision(strategy_id, run_id, False, None, (str(exc),))
 
-    existing = admissions.get(run_id)
+    existing = admissions.get(run_id, strategy_id)
     if state is not None and state.stage is StrategyLifecycleStage.PAPER and existing is not None:
-        if existing.strategy_id != strategy_id or not admissions.verify(run_id):
+        if not admissions.verify(run_id, strategy_id):
             return SuccessorPaperHandoffDecision(
                 strategy_id,
                 run_id,
@@ -82,8 +76,6 @@ def handoff_successor_to_paper(
     members = portfolio.get("members")
     if not isinstance(members, dict) or strategy_id not in members:
         reasons.append("successor is not a member of the persisted portfolio")
-    elif len(members) != 1:
-        reasons.append("successor paper handoff requires a single-strategy portfolio run")
 
     definition = portfolio.get("definition")
     experiment_ids = definition.get("experiment_ids") if isinstance(definition, dict) else None
