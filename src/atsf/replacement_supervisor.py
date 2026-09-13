@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from .lifecycle import StrategyLifecycleStage
 from .lifecycle_store import LifecycleStore
 from .replacement_cycle import ReplacementCycleStore
-from .research_queue import ResearchReason, ResearchQueue
+from .research_queue import ResearchReason
 from .research_registry import ResearchRequestStore
 from .registry import ExperimentRegistry
 
