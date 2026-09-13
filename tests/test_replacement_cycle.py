@@ -55,6 +55,15 @@ def test_replacement_cycle_persists_candidates_evaluations_and_admissions():
         for evaluation in result.evaluation.evaluations
         if registry.get_lineage(evaluation.candidate_id) is not None
     )
+    assert all(
+        registry.get_evaluation_evidence(evaluation.experiment.experiment_id) is not None
+        for evaluation in result.evaluation.evaluations
+    )
+    assert all(
+        registry.get_evaluation_evidence(evaluation.experiment.experiment_id)["replacement"]["request_id"]
+        == request.request_id
+        for evaluation in result.evaluation.evaluations
+    )
     assert ReplacementCycleStore(registry).get(request.request_id) is not None
     assert lifecycle.get("failed-strategy").stage is StrategyLifecycleStage.RESEARCH
     registry.close()
