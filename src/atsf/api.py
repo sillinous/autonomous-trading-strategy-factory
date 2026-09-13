@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
 from .feedback_registry import FeedbackEventStore
+from .lifecycle import StrategyLifecycleStage
+from .paper_admission import admit_to_paper
+from .paper_admission_store import PaperAdmissionStore
 from .paper_replay import verify_paper_replay
 from .portfolio_executor import execute_persisted_portfolio
 from .portfolio_replay import verify_persisted_portfolio_run
@@ -38,6 +41,11 @@ class PaperRunRequest(BaseModel):
     commission_bps: float = Field(default=1.0, ge=0)
     slippage_bps: float = Field(default=2.0, ge=0)
     max_drawdown: float | None = Field(default=None, gt=0, lt=1)
+
+
+class PaperAdmissionRequest(BaseModel):
+    strategy_id: str = Field(min_length=1)
+    reason: str = Field(default="verified reproducibility evidence", min_length=1)
 
 
 class ReplayVerificationRequest(BaseModel):
@@ -154,6 +162,40 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     def paper_replay(run_id: str, store: ExperimentRegistry = Store) -> dict:
         result = verify_paper_replay(store, run_id)
         return {"replayable": result.replayable, "admission_id": result.admission_id, "strategy_id": result.strategy_id, "reasons": result.reasons}
+
+    @app.post("/runs/{run_id}/paper-admission", dependencies=[Auth])
+    def paper_admission(run_id: str, request: PaperAdmissionRequest, store: ExperimentRegistry = Store) -> dict:
+        run = store.get_portfolio_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="paper run not found")
+        portfolio = store.get_portfolio(run.get("portfolio_id", ""))
+        if portfolio is None:
+            raise HTTPException(status_code=409, detail="paper run references an unknown portfolio")
+        members = portfolio.get("members", {})
+        if request.strategy_id not in members:
+            raise HTTPException(status_code=400, detail="strategy is not a member of the persisted portfolio")
+        experiment_id = portfolio.get("definition", {}).get("experiment_ids", {}).get(request.strategy_id)
+        if not experiment_id:
+            raise HTTPException(status_code=409, detail="portfolio is missing strategy experiment provenance")
+        evidence = store.get_evaluation_evidence(experiment_id)
+        if evidence is None or not isinstance(evidence.get("promotion"), dict):
+            raise HTTPException(status_code=409, detail="promotion evidence is missing")
+        promotion = evidence["promotion"]
+        source = str(promotion.get("stage", "")).upper()
+        if source != StrategyLifecycleStage.PROMOTED.value:
+            raise HTTPException(status_code=409, detail="strategy is not in promoted lifecycle stage")
+        certificate = store.get_reproducibility_certificate(run_id)
+        decision = admit_to_paper(
+            request.strategy_id,
+            source_stage=StrategyLifecycleStage.PROMOTED,
+            run=run,
+            certificate=certificate,
+            reason=request.reason,
+            registry=store,
+        )
+        if not decision.admitted:
+            raise HTTPException(status_code=409, detail={"admitted": False, "reasons": decision.reasons, "admission_id": decision.admission_id})
+        return {"admitted": True, "strategy_id": request.strategy_id, "run_id": run_id, "admission_id": decision.admission_id, "source_stage": source, "target_stage": StrategyLifecycleStage.PAPER.value, "reason": request.reason}
 
     @app.post("/runs/{run_id}/verify-replay", dependencies=[Auth])
     def verify_replay(run_id: str, request: ReplayVerificationRequest, store: ExperimentRegistry = Store) -> dict:
