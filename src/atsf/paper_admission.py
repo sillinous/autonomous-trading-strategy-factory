@@ -73,7 +73,7 @@ def admit_to_paper(
     admissions = PaperAdmissionStore(registry)
     try:
         persisted = lifecycle.get(strategy_id)
-        existing = admissions.get(str(run["run_id"]))
+        existing = admissions.get(str(run["run_id"]), strategy_id)
         if existing is not None:
             if existing != record:
                 return PaperAdmissionDecision(False, None, ("paper admission already exists and is immutable",), existing.admission_id)
@@ -81,6 +81,8 @@ def admit_to_paper(
                 return PaperAdmissionDecision(False, None, ("persisted lifecycle state is missing",), record.admission_id)
             if persisted.stage is not StrategyLifecycleStage.PAPER:
                 return PaperAdmissionDecision(False, None, ("persisted lifecycle stage does not match PAPER admission",), record.admission_id)
+            if not admissions.verify(str(run["run_id"]), strategy_id):
+                return PaperAdmissionDecision(False, None, ("existing paper admission failed durable verification",), existing.admission_id)
             return PaperAdmissionDecision(
                 True,
                 PromotionLifecycleEvent(strategy_id, StrategyLifecycleStage.PROMOTED, StrategyLifecycleStage.PAPER, existing.reason),
