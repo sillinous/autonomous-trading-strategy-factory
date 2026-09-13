@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from atsf.api import create_app
 from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
+from atsf.lifecycle import StrategyLifecycleStage
+from atsf.lifecycle_store import LifecycleStore
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
 
@@ -27,6 +29,7 @@ def bars(count: int = 4) -> list[dict]:
 def seed(registry: ExperimentRegistry) -> str:
     item = strategy()
     strategy_id = registry.save_strategy(item)
+    LifecycleStore(registry._connection).save(strategy_id, StrategyLifecycleStage.PROMOTED, reason="promotion gate")
     registry.register_dataset(DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"), source="fixture")
     spec = ExperimentSpec(item, "prices", "v1", seed=1)
     registry.save_experiment(spec, ExperimentResult(spec.experiment_id, "paper", score=1.0))
@@ -61,6 +64,7 @@ def test_paper_admission_api_requires_verified_certificate_and_persists_admissio
     assert payload["source_stage"] == "promoted"
     assert payload["target_stage"] == "paper"
     assert payload["admission_id"]
+    assert LifecycleStore(registry._connection).get(strategy_id).stage is StrategyLifecycleStage.PAPER
 
     replay = client.get(f"/runs/{run_id}/paper-replay")
     assert replay.status_code == 200
