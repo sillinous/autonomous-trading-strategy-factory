@@ -6,6 +6,7 @@ from .certificate_integrity import verify_persisted_certificate
 from .lifecycle import StrategyLifecycleStage
 from .lifecycle_store import LifecycleStore
 from .paper_admission import PaperAdmissionDecision, admit_to_paper
+from .paper_admission_store import PaperAdmissionStore
 from .portfolio_replay import verify_persisted_portfolio_run
 from .registry import ExperimentRegistry
 
@@ -44,10 +45,24 @@ def handoff_successor_to_paper(
         return SuccessorPaperHandoffDecision(strategy_id, run_id, False, None, tuple(reasons))
 
     lifecycle = LifecycleStore(registry._connection)
+    admissions = PaperAdmissionStore(registry)
     try:
         state = lifecycle.get(strategy_id)
     except ValueError as exc:
         return SuccessorPaperHandoffDecision(strategy_id, run_id, False, None, (str(exc),))
+
+    existing = admissions.get(run_id)
+    if state is not None and state.stage is StrategyLifecycleStage.PAPER and existing is not None:
+        if existing.strategy_id != strategy_id or not admissions.verify(run_id):
+            return SuccessorPaperHandoffDecision(
+                strategy_id,
+                run_id,
+                False,
+                existing.admission_id,
+                ("existing PAPER admission failed durable verification",),
+            )
+        return SuccessorPaperHandoffDecision(strategy_id, run_id, True, existing.admission_id, ())
+
     if state is None:
         reasons.append("successor lifecycle state is missing")
     elif state.stage is not StrategyLifecycleStage.PROMOTED:
