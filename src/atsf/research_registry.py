@@ -70,15 +70,22 @@ class ResearchRequestStore:
             constraints=tuple(payload.get("constraints", [])),
         )
 
-    def list_for_strategy(self, strategy_id: str) -> tuple[ResearchRequest, ...]:
-        if not strategy_id:
-            raise ValueError("strategy_id cannot be empty")
+    def list_all(self) -> tuple[ResearchRequest, ...]:
+        """Return all persisted requests in deterministic request-id order."""
         rows = self._connection.execute(
             "SELECT request_id FROM research_requests ORDER BY request_id"
         ).fetchall()
-        requests = []
-        for (request_id,) in rows:
-            request = self.get(request_id)
-            if request is not None and request.source_strategy_id == strategy_id:
-                requests.append(request)
-        return tuple(requests)
+        return tuple(
+            request
+            for (request_id,) in rows
+            if (request := self.get(request_id)) is not None
+        )
+
+    def list_for_strategy(self, strategy_id: str) -> tuple[ResearchRequest, ...]:
+        if not strategy_id:
+            raise ValueError("strategy_id cannot be empty")
+        return tuple(
+            request
+            for request in self.list_all()
+            if request.source_strategy_id == strategy_id
+        )
