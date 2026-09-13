@@ -153,12 +153,7 @@ def _persist_evaluation_evidence(
     dataset_version: str,
     seed: int,
 ) -> None:
-    spec = ExperimentSpec(
-        candidate.strategy,
-        dataset_id,
-        dataset_version,
-        seed,
-    )
+    spec = ExperimentSpec(candidate.strategy, dataset_id, dataset_version, seed)
     if spec.experiment_id != evaluation.experiment.experiment_id:
         raise ValueError(f"replacement experiment identity mismatch: {evaluation.candidate_id}")
     registry.save_experiment(spec, evaluation.experiment)
@@ -201,7 +196,7 @@ def _persist_evaluation_evidence(
                         "total_return": scenario.total_return,
                         "max_drawdown": scenario.max_drawdown,
                     }
-                    for name, scenario in evaluation.robustness.scenarios.items()
+                    for name, scenario in evaluation.robustness.scenarios
                 },
             },
             "promotion": {
@@ -283,52 +278,25 @@ def run_replacement_cycle(
             source="replacement-cycle",
         )
 
-    for offset, (candidate, candidate_evaluation) in enumerate(
-        zip(research.candidates, evaluation.evaluations)
-    ):
-        _persist_evaluation_evidence(
-            registry,
-            candidate,
-            candidate_evaluation,
-            dataset_id,
-            dataset_version,
-            seed + offset,
-        )
+    for offset, (candidate, candidate_evaluation) in enumerate(zip(research.candidates, evaluation.evaluations)):
+        _persist_evaluation_evidence(registry, candidate, candidate_evaluation, dataset_id, dataset_version, seed + offset)
 
     admissions: list[SuccessorAdmission] = []
     seen_ids: set[str] = set()
     for candidate, candidate_evaluation in zip(research.candidates, evaluation.evaluations):
         admission_candidate = _candidate_for_admission(candidate)
-        admission = admit_successor(
-            admission_candidate,
-            candidate_evaluation,
-            generation=2,
-            existing_ids=seen_ids,
-        )
+        admission = admit_successor(admission_candidate, candidate_evaluation, generation=2, existing_ids=seen_ids)
         admissions.append(admission)
         if admission.admitted:
             seen_ids.add(admission.candidate_id)
             registry.save_lineage(successor_lineage(admission_candidate, admission))
-            synchronize_candidate_lifecycle(
-                lifecycle,
-                candidate_evaluation,
-                reason_prefix=f"replacement {request.request_id}",
-            )
+            synchronize_candidate_lifecycle(lifecycle, candidate_evaluation, reason_prefix=f"replacement {request.request_id}")
 
     if not any(item.admitted for item in admissions):
         for candidate_evaluation in evaluation.evaluations:
-            synchronize_candidate_lifecycle(
-                lifecycle,
-                candidate_evaluation,
-                reason_prefix=f"replacement {request.request_id}",
-            )
+            synchronize_candidate_lifecycle(lifecycle, candidate_evaluation, reason_prefix=f"replacement {request.request_id}")
 
-    lifecycle.transition(
-        request.source_strategy_id,
-        StrategyLifecycleStage.DEGRADED,
-        StrategyLifecycleStage.RESEARCH,
-        reason=f"replacement research cycle {request.request_id} completed",
-    )
+    lifecycle.transition(request.source_strategy_id, StrategyLifecycleStage.DEGRADED, StrategyLifecycleStage.RESEARCH, reason=f"replacement research cycle {request.request_id} completed")
 
     result = ReplacementCycleResult(
         cycle_id=_cycle_id(request),
