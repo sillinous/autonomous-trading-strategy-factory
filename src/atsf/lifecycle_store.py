@@ -80,6 +80,7 @@ class LifecycleStore:
         target: StrategyLifecycleStage,
         *,
         reason: str,
+        commit: bool = True,
     ) -> PersistedLifecycle:
         if not strategy_id.strip():
             raise ValueError("strategy_id is required")
@@ -97,11 +98,12 @@ class LifecycleStore:
             raise ValueError("persisted lifecycle state integrity check failed")
         if row["stage"] != source.value:
             raise ValueError("persisted lifecycle source stage does not match admission source")
-        with self._connection:
-            self._connection.execute(
-                "UPDATE strategy_lifecycle SET stage = ?, reason = ?, integrity_hash = ? WHERE strategy_id = ?",
-                (target.value, reason, self._integrity_hash(strategy_id, target.value, reason), strategy_id),
-            )
+        self._connection.execute(
+            "UPDATE strategy_lifecycle SET stage = ?, reason = ?, integrity_hash = ? WHERE strategy_id = ?",
+            (target.value, reason, self._integrity_hash(strategy_id, target.value, reason), strategy_id),
+        )
+        if commit:
+            self._connection.commit()
         return PersistedLifecycle(strategy_id, target, reason)
 
     def get(self, strategy_id: str) -> PersistedLifecycle | None:
