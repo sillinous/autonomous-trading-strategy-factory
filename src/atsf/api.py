@@ -13,6 +13,7 @@ from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
 from .feedback_registry import FeedbackEventStore
 from .lifecycle import StrategyLifecycleStage
+from .lifecycle_store import LifecycleStore
 from .paper_admission import admit_to_paper
 from .paper_replay import verify_paper_replay
 from .portfolio_executor import execute_persisted_portfolio
@@ -115,6 +116,28 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="paper run not found")
         return result
 
+    @app.get("/strategies/{strategy_id}/lifecycle", dependencies=[Auth])
+    def strategy_lifecycle(strategy_id: str, store: ExperimentRegistry = Store) -> dict:
+        if not strategy_id:
+            raise HTTPException(status_code=400, detail="strategy_id cannot be empty")
+        try:
+            lifecycle = LifecycleStore(store._connection).get(strategy_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if lifecycle is None:
+            raise HTTPException(status_code=404, detail="strategy lifecycle not found")
+        return {"strategy_id": lifecycle.strategy_id, "stage": lifecycle.stage.value, "reason": lifecycle.reason}
+
+    @app.get("/strategies/{strategy_id}/lifecycle/history", dependencies=[Auth])
+    def strategy_lifecycle_history(strategy_id: str, store: ExperimentRegistry = Store) -> dict:
+        if not strategy_id:
+            raise HTTPException(status_code=400, detail="strategy_id cannot be empty")
+        try:
+            events = LifecycleStore(store._connection).history(strategy_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"strategy_id": strategy_id, "event_count": len(events), "events": [{"sequence": event.sequence, "strategy_id": event.strategy_id, "source_stage": None if event.source_stage is None else event.source_stage.value, "target_stage": event.target_stage.value, "reason": event.reason, "integrity_hash": event.integrity_hash} for event in events]}
+
     @app.get("/strategies/{strategy_id}/feedback", dependencies=[Auth])
     def strategy_feedback(strategy_id: str, store: ExperimentRegistry = Store) -> dict:
         if not strategy_id:
@@ -183,14 +206,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         if source != StrategyLifecycleStage.PROMOTED.value:
             raise HTTPException(status_code=409, detail="strategy is not in promoted lifecycle stage")
         certificate = store.get_reproducibility_certificate(run_id)
-        decision = admit_to_paper(
-            request.strategy_id,
-            source_stage=StrategyLifecycleStage.PROMOTED,
-            run=run,
-            certificate=certificate,
-            reason=request.reason,
-            registry=store,
-        )
+        decision = admit_to_paper(request.strategy_id, source_stage=StrategyLifecycleStage.PROMOTED, run=run, certificate=certificate, reason=request.reason, registry=store)
         if not decision.admitted:
             raise HTTPException(status_code=409, detail={"admitted": False, "reasons": decision.reasons, "admission_id": decision.admission_id})
         return {"admitted": True, "strategy_id": request.strategy_id, "run_id": run_id, "admission_id": decision.admission_id, "source_stage": source, "target_stage": StrategyLifecycleStage.PAPER.value, "reason": request.reason}
