@@ -6,6 +6,7 @@ from hashlib import sha256
 
 import pandas as pd
 
+from .dataset_bundle import DatasetBundleIdentity
 from .experiment import ExperimentSpec
 from .fitness import FitnessPolicy
 from .generator import StrategyCandidate
@@ -264,6 +265,23 @@ def run_replacement_cycle(
         validation_policy=validation_policy,
         promotion_policy=promotion_policy,
     )
+
+    if registry.get_dataset(dataset_id, dataset_version) is None:
+        if data.empty:
+            raise ValueError("replacement research data cannot be empty")
+        registry.register_dataset(
+            DatasetBundleIdentity(
+                dataset_id=dataset_id,
+                version=dataset_version,
+                symbols=tuple(symbols),
+                rows=len(data),
+                start=str(data.index[0]),
+                end=str(data.index[-1]),
+                source="replacement-cycle",
+                timeframe="1d",
+            ),
+            source="replacement-cycle",
+        )
 
     for offset, (candidate, candidate_evaluation) in enumerate(
         zip(research.candidates, evaluation.evaluations)
