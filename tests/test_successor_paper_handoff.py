@@ -92,7 +92,7 @@ def test_successor_handoff_requires_verified_paper_run_and_admits():
     registry.close()
 
 
-def test_successor_handoff_rejects_multi_strategy_run_before_paper_admission():
+def test_successor_handoff_rejects_incomplete_multi_strategy_provenance():
     registry = ExperimentRegistry()
     strategy_id = seed(registry)
     second = registry.save_strategy(strategy("second"))
@@ -109,6 +109,6 @@ def test_successor_handoff_rejects_multi_strategy_run_before_paper_admission():
     )
     decision = handoff_successor_to_paper(registry, strategy_id, "multi-run")
     assert decision.admitted is False
-    assert any("single-strategy" in reason for reason in decision.reasons)
+    assert any("experiment provenance" in reason for reason in decision.reasons)
     assert LifecycleStore(registry._connection).get(strategy_id).stage is StrategyLifecycleStage.PROMOTED
     registry.close()
