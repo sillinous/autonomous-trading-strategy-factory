@@ -6,6 +6,7 @@ from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lifecycle import StrategyLifecycleStage
 from atsf.lifecycle_store import LifecycleStore
+from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
 
@@ -29,6 +30,7 @@ def bars(count: int = 4) -> list[dict]:
 def seed(registry: ExperimentRegistry) -> str:
     item = strategy()
     strategy_id = registry.save_strategy(item)
+    registry.save_lineage(LineageRecord(strategy_id=strategy_id, generation=0))
     LifecycleStore(registry._connection).save(strategy_id, StrategyLifecycleStage.PROMOTED, reason="promotion gate")
     registry.register_dataset(DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"), source="fixture")
     spec = ExperimentSpec(item, "prices", "v1", seed=1)
