@@ -5,8 +5,9 @@ from dataclasses import dataclass, replace
 import pandas as pd
 
 from .fitness import FitnessPolicy
+from .lineage import LineageRecord
 from .orchestrator import CandidateEvaluation, evaluate_candidate
-from .population import Candidate
+from .population import Candidate, strategy_id
 from .promotion import PromotionDecision, PromotionPolicy
 from .replacement_research import ReplacementResearchResult
 from .validation import ValidationPolicy
@@ -35,17 +36,17 @@ def evaluate_replacements(
     for offset, candidate in enumerate(research.candidates):
         if candidate.parent_strategy_id is None:
             raise ValueError(f"replacement candidate has no parent: {candidate.candidate_id}")
-        from .lineage import LineageRecord
 
+        canonical_id = strategy_id(candidate.strategy)
         lineage = LineageRecord(
-            strategy_id=candidate.candidate_id,
+            strategy_id=canonical_id,
             generation=1,
             parent_ids=(candidate.parent_strategy_id,),
             operator=candidate.mutation,
             parameters={"request_id": candidate.request_id, "candidate_id": candidate.candidate_id},
         )
         evaluation = evaluate_candidate(
-            Candidate(strategy=candidate.strategy, strategy_id=candidate.candidate_id, lineage=lineage),
+            Candidate(strategy=candidate.strategy, strategy_id=canonical_id, lineage=lineage),
             data,
             dataset_id,
             dataset_version,
