@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pandas as pd
+
 from .lifecycle import StrategyLifecycleStage
 from .lifecycle_integration import synchronize_candidate_lifecycle
 from .lifecycle_store import LifecycleStore, PersistedLifecycle
 from .registry import ExperimentRegistry
 from .research import ResearchRunResult, run_research
 from .strategy import StrategySpec
-import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -23,12 +24,7 @@ def synchronize_research_lifecycle(
     registry: ExperimentRegistry,
     research: ResearchRunResult,
 ) -> tuple[PersistedLifecycle, ...]:
-    """Synchronize every completed evaluation into durable lifecycle state.
-
-    The operation is deterministic and fail-closed. Existing lifecycle state is
-    validated before any transition is attempted; a candidate cannot silently
-    move backwards or bypass the validation/promotion gates.
-    """
+    """Synchronize every completed evaluation into durable lifecycle state."""
     store = LifecycleStore(registry._connection)
     states: list[PersistedLifecycle] = []
     for generation in research.generations:
@@ -56,6 +52,10 @@ def run_research_with_lifecycle(
             store.close()
 
 
-def lifecycle_stage(registry: ExperimentRegistry, strategy_id: str) -> StrategyLifecycleStage | None:
+def lifecycle_stage(
+    registry: ExperimentRegistry,
+    strategy_id: str,
+) -> StrategyLifecycleStage | None:
     """Return an integrity-checked persisted stage for supervisory callers."""
-    return LifecycleStore(registry._connection).get(strategy_id).stage if LifecycleStore(registry._connection).get(strategy_id) else None
+    record = LifecycleStore(registry._connection).get(strategy_id)
+    return None if record is None else record.stage
