@@ -3,14 +3,14 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from atsf.api import create_app
+from atsf.dataset_bundle import DatasetBundleIdentity
+from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lifecycle import StrategyLifecycleStage
 from atsf.lifecycle_store import LifecycleStore
 from atsf.lineage import LineageRecord
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, PositionSizing, RiskLimits, Signal, StrategySpec
 from atsf.successor_paper_handoff import handoff_successor_to_paper
-from atsf.dataset_bundle import DatasetBundleIdentity
-from atsf.experiment import ExperimentResult, ExperimentSpec
 
 
 def strategy(name: str) -> StrategySpec:
@@ -37,9 +37,10 @@ def bars(count: int = 4) -> list[dict]:
 def seed(registry: ExperimentRegistry) -> str:
     item = strategy("successor-handoff")
     strategy_id = registry.save_strategy(item)
-    registry.save_lineage(LineageRecord(strategy_id=strategy_id, generation=2, parent_ids=("parent-1",), operator="mutation"))
+    parent_id = registry.save_strategy(strategy("parent"))
+    registry.save_lineage(LineageRecord(strategy_id=parent_id, generation=0))
+    registry.save_lineage(LineageRecord(strategy_id=strategy_id, generation=2, parent_ids=(parent_id,), operator="mutation"))
     LifecycleStore(registry._connection).save(strategy_id, StrategyLifecycleStage.PROMOTED, reason="successor promotion")
-    registry.save_strategy(strategy("parent"))
     registry.register_dataset(
         DatasetBundleIdentity("prices", "v1", ("TEST",), 1, "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
         source="fixture",
