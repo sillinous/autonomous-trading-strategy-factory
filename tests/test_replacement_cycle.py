@@ -3,7 +3,7 @@ import pytest
 
 from atsf.lifecycle import StrategyLifecycleStage
 from atsf.lifecycle_store import LifecycleStore
-from atsf.replacement_cycle import ReplacementCycleStore, run_replacement_cycle
+from atsf.replacement_cycle import ReplacementCycleResult, ReplacementCycleStore, run_replacement_cycle
 from atsf.research_queue import ResearchReason, ResearchRequest
 from atsf.research_registry import ResearchRequestStore
 from atsf.registry import ExperimentRegistry
@@ -66,6 +66,39 @@ def test_replacement_cycle_persists_candidates_evaluations_and_admissions():
     )
     assert ReplacementCycleStore(registry).get(request.request_id) is not None
     assert lifecycle.get("failed-strategy").stage is StrategyLifecycleStage.RESEARCH
+    registry.close()
+
+
+def test_replacement_cycle_store_rejects_mutation():
+    registry = ExperimentRegistry()
+    store = ReplacementCycleStore(registry)
+    request = ResearchRequest(
+        request_id="replacement-cycle-store-1",
+        source_strategy_id="failed-strategy",
+        reason=ResearchReason.DEGRADED,
+        priority=0,
+        constraints=(),
+    )
+    result = ReplacementCycleResult(
+        cycle_id="cycle-1",
+        request_id=request.request_id,
+        source_strategy_id=request.source_strategy_id,
+        research=type("Research", (), {"candidates": ()})(),
+        evaluation=type("Evaluation", (), {"evaluations": ()})(),
+        admissions=(),
+    )
+    store.save(result)
+    assert store.get(request.request_id) is not None
+    mutated = ReplacementCycleResult(
+        cycle_id="cycle-2",
+        request_id=request.request_id,
+        source_strategy_id=request.source_strategy_id,
+        research=result.research,
+        evaluation=result.evaluation,
+        admissions=(),
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        store.save(mutated)
     registry.close()
 
 
