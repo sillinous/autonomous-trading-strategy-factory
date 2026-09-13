@@ -6,6 +6,7 @@ from hashlib import sha256
 
 import pandas as pd
 
+from .experiment import ExperimentSpec
 from .fitness import FitnessPolicy
 from .generator import StrategyCandidate
 from .lifecycle import StrategyLifecycleStage
@@ -19,7 +20,6 @@ from .replacement_research import ReplacementResearchResult, generate_replacemen
 from .research_queue import ResearchRequest
 from .research_registry import ResearchRequestStore
 from .successor import SuccessorAdmission, admit_successor, successor_lineage
-from .successor_registry import SuccessorCandidateStore
 from .validation import ValidationPolicy
 
 
@@ -144,6 +144,80 @@ def _candidate_for_admission(candidate: StrategyCandidate) -> Candidate:
     )
 
 
+def _persist_evaluation_evidence(
+    registry: ExperimentRegistry,
+    candidate: StrategyCandidate,
+    evaluation,
+    dataset_id: str,
+    dataset_version: str,
+    seed: int,
+) -> None:
+    spec = ExperimentSpec(
+        candidate.strategy,
+        dataset_id,
+        dataset_version,
+        seed,
+    )
+    if spec.experiment_id != evaluation.experiment.experiment_id:
+        raise ValueError(f"replacement experiment identity mismatch: {evaluation.candidate_id}")
+    registry.save_experiment(spec, evaluation.experiment)
+    registry.save_evaluation_evidence(
+        evaluation.experiment.experiment_id,
+        {
+            "candidate_id": evaluation.candidate_id,
+            "walk_forward": {
+                "passed": evaluation.walk_forward.passed,
+                "oos_return": evaluation.walk_forward.oos_return,
+                "oos_sharpe": evaluation.walk_forward.oos_sharpe,
+                "oos_drawdown": evaluation.walk_forward.oos_drawdown,
+            },
+            "monte_carlo": {
+                "simulations": evaluation.monte_carlo.simulations,
+                "seed": evaluation.monte_carlo.seed,
+                "median_return": evaluation.monte_carlo.median_return,
+                "worst_return": evaluation.monte_carlo.worst_return,
+                "lower_percentile_return": evaluation.monte_carlo.lower_percentile_return,
+                "pass_rate": evaluation.monte_carlo.pass_rate,
+            },
+            "perturbation": {
+                "samples": evaluation.perturbation.samples,
+                "seed": evaluation.perturbation.seed,
+                "pass_rate": evaluation.perturbation.pass_rate,
+                "worst_score": evaluation.perturbation.worst_score,
+                "median_score": evaluation.perturbation.median_score,
+                "strategy_ids": evaluation.perturbation.strategy_ids,
+            },
+            "regime": {
+                "score": evaluation.regime.score,
+                "regime_returns": evaluation.regime.regime_returns,
+                "covered_regimes": evaluation.regime.covered_regimes,
+            },
+            "robustness": {
+                "passed": evaluation.robustness.passed,
+                "reasons": evaluation.robustness.reasons,
+                "scenarios": {
+                    name: {
+                        "total_return": scenario.total_return,
+                        "max_drawdown": scenario.max_drawdown,
+                    }
+                    for name, scenario in evaluation.robustness.scenarios.items()
+                },
+            },
+            "promotion": {
+                "stage": evaluation.promotion.stage,
+                "eligible": evaluation.promotion.eligible,
+                "reasons": evaluation.promotion.reasons,
+            },
+            "replacement": {
+                "request_id": candidate.request_id,
+                "candidate_id": candidate.candidate_id,
+                "parent_strategy_id": candidate.parent_strategy_id,
+                "mutation": candidate.mutation,
+            },
+        },
+    )
+
+
 def run_replacement_cycle(
     registry: ExperimentRegistry,
     request: ResearchRequest,
@@ -174,7 +248,12 @@ def run_replacement_cycle(
     if source is None or source.stage is not StrategyLifecycleStage.DEGRADED:
         raise ValueError("replacement cycle requires a DEGRADED source strategy")
 
-    research = generate_replacements(request, symbols, request_store=ResearchRequestStore(registry), registry=registry)
+    research = generate_replacements(
+        request,
+        symbols,
+        request_store=ResearchRequestStore(registry),
+        registry=registry,
+    )
     evaluation = evaluate_replacements(
         research,
         data,
@@ -185,6 +264,18 @@ def run_replacement_cycle(
         validation_policy=validation_policy,
         promotion_policy=promotion_policy,
     )
+
+    for offset, (candidate, candidate_evaluation) in enumerate(
+        zip(research.candidates, evaluation.evaluations)
+    ):
+        _persist_evaluation_evidence(
+            registry,
+            candidate,
+            candidate_evaluation,
+            dataset_id,
+            dataset_version,
+            seed + offset,
+        )
 
     admissions: list[SuccessorAdmission] = []
     seen_ids: set[str] = set()
@@ -207,7 +298,6 @@ def run_replacement_cycle(
             )
 
     if not any(item.admitted for item in admissions):
-        # Persist candidate lifecycle outcomes even when no successor qualifies.
         for candidate_evaluation in evaluation.evaluations:
             synchronize_candidate_lifecycle(
                 lifecycle,
@@ -219,7 +309,7 @@ def run_replacement_cycle(
         request.source_strategy_id,
         StrategyLifecycleStage.DEGRADED,
         StrategyLifecycleStage.RESEARCH,
-        reason=f"replacement research cycle {request.request_id} admitted",
+        reason=f"replacement research cycle {request.request_id} completed",
     )
 
     result = ReplacementCycleResult(
