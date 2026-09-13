@@ -8,7 +8,7 @@ from atsf.registry import ExperimentRegistry
 
 def test_lifecycle_api_exposes_state_and_integrity_checked_history():
     registry = ExperimentRegistry()
-    strategy_id = registry.save_strategy({"name": "api-lifecycle"}) if False else "strategy-api-lifecycle"
+    strategy_id = "strategy-api-lifecycle"
     LifecycleStore(registry._connection).save(strategy_id, StrategyLifecycleStage.RESEARCH, reason="research admitted")
     LifecycleStore(registry._connection).transition(strategy_id, StrategyLifecycleStage.RESEARCH, StrategyLifecycleStage.VALIDATED, reason="validation passed")
     client = TestClient(create_app(registry))
