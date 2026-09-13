@@ -46,7 +46,7 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     if max_drawdown is not None and not 0 < max_drawdown < 1:
         raise ValueError("max_drawdown must be between 0 and 1")
     for strategy_id, decision in decisions.items():
-        if not decision.eligible or decision.stage not in {"paper", "live"}:
+        if not decision.eligible or decision.stage not in {"promoted", "paper", "live"}:
             raise PermissionError(f"strategy {strategy_id} is not eligible for paper execution")
     indexes = [frame.index for frame in data.values()]
     if any(not isinstance(index, pd.DatetimeIndex) for index in indexes):
