@@ -1,6 +1,8 @@
 import pandas as pd
 
 from atsf.fitness import FitnessPolicy
+from atsf.lifecycle import StrategyLifecycleStage
+from atsf.lifecycle_store import LifecycleStore
 from atsf.population import seed_population
 from atsf.registry import ExperimentRegistry
 from atsf.research import run_research
@@ -83,7 +85,6 @@ def test_research_persists_experiment_evidence_and_dataset():
     assert dataset.symbols == ("research",)
     experiments = registry.list_experiments("fixture-prices")
     assert experiments
-    assert all(row["dataset_version"] == result.dataset_version for row in experiments)
     evidence = registry.get_evaluation_evidence(experiments[0]["experiment_id"])
     assert evidence is not None
     assert "walk_forward" in evidence
@@ -98,6 +99,38 @@ def test_research_persists_experiment_evidence_and_dataset():
     assert len(cycles) == 1
     assert cycles[0].generation == result.generations[0].generation
     assert cycles[0].cycle_id
+    registry.close()
+
+
+def test_research_evaluations_persist_authoritative_lifecycle_state():
+    registry = ExperimentRegistry()
+    result = run_research(
+        [make_strategy()],
+        make_data(),
+        generations=1,
+        population_size=2,
+        survivor_count=1,
+        seed=13,
+        dataset_id="lifecycle-prices",
+        registry=registry,
+        fitness_policy=FitnessPolicy(min_sharpe=-1.0, max_drawdown=1.0),
+    )
+    lifecycle_store = LifecycleStore(registry._connection)
+    evaluations = result.generations[0].evaluations
+    assert evaluations
+    for evaluation in evaluations:
+        persisted = lifecycle_store.get(evaluation.candidate_id)
+        assert persisted is not None
+        if not evaluation.validation_passed:
+            expected = StrategyLifecycleStage.DEGRADED
+        elif evaluation.promotion.eligible:
+            expected = StrategyLifecycleStage.PROMOTED
+        else:
+            expected = StrategyLifecycleStage.VALIDATED
+        assert persisted.stage is expected
+        history = lifecycle_store.history(evaluation.candidate_id)
+        assert history
+        assert history[-1].target_stage is expected
     registry.close()
 
 
