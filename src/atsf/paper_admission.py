@@ -8,6 +8,7 @@ from .lifecycle import (
     StrategyLifecycleStage,
     transition_promotion_stage,
 )
+from .lifecycle_store import LifecycleStore
 from .paper_admission_record import build_admission_record
 from .paper_admission_store import PaperAdmissionStore
 from .registry import ExperimentRegistry
@@ -30,12 +31,7 @@ def admit_to_paper(
     reason: str = "verified reproducibility evidence",
     registry: ExperimentRegistry | None = None,
 ) -> PaperAdmissionDecision:
-    """Fail-closed boundary from PROMOTED to PAPER.
-
-    When a registry is supplied, the admission is durably persisted before the
-    lifecycle event is returned. No broker or live-execution capability exists
-    in this boundary.
-    """
+    """Fail-closed boundary from PROMOTED to PAPER."""
     reasons: list[str] = []
     if source_stage is not StrategyLifecycleStage.PROMOTED:
         reasons.append("strategy must be in promoted lifecycle stage")
@@ -64,11 +60,39 @@ def admit_to_paper(
         str(certificate["certificate_id"]),
         reason=reason,
     )
-    if registry is not None:
-        try:
-            PaperAdmissionStore(registry).save(record)
-        except (KeyError, ValueError) as exc:
-            return PaperAdmissionDecision(False, None, (str(exc),), record.admission_id)
+    if registry is None:
+        event = transition_promotion_stage(
+            strategy_id,
+            source_stage,
+            StrategyLifecycleStage.PAPER,
+            reason=reason,
+        )
+        return PaperAdmissionDecision(True, event, (), record.admission_id)
+
+    lifecycle = LifecycleStore(registry._connection)
+    admissions = PaperAdmissionStore(registry)
+    try:
+        persisted = lifecycle.get(strategy_id)
+        existing = admissions.get(str(run["run_id"]))
+        if existing is not None:
+            if existing != record:
+                return PaperAdmissionDecision(False, None, ("paper admission already exists and is immutable",), existing.admission_id)
+            if persisted is None:
+                return PaperAdmissionDecision(False, None, ("persisted lifecycle state is missing",), record.admission_id)
+            if persisted.stage is not StrategyLifecycleStage.PAPER:
+                return PaperAdmissionDecision(False, None, ("persisted lifecycle stage does not match PAPER admission",), record.admission_id)
+            return PaperAdmissionDecision(
+                True,
+                PromotionLifecycleEvent(strategy_id, StrategyLifecycleStage.PROMOTED, StrategyLifecycleStage.PAPER, existing.reason),
+                (),
+                existing.admission_id,
+            )
+        if persisted is None:
+            return PaperAdmissionDecision(False, None, ("persisted lifecycle state is missing",), record.admission_id)
+        lifecycle.transition(strategy_id, source_stage, StrategyLifecycleStage.PAPER, reason=reason)
+        admissions.save(record)
+    except (KeyError, ValueError) as exc:
+        return PaperAdmissionDecision(False, None, (str(exc),), record.admission_id)
 
     event = transition_promotion_stage(
         strategy_id,
