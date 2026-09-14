@@ -33,8 +33,9 @@ def evaluation(
     )
 
 
-def candidate(candidate_id: str):
-    return SimpleNamespace(strategy_id=candidate_id)
+def candidate(candidate_id: str, payload_value: int = 1):
+    strategy = SimpleNamespace(model_dump=lambda mode=None: {"feature": payload_value})
+    return SimpleNamespace(strategy_id=candidate_id, strategy=strategy)
 
 
 def test_pareto_front_removes_dominated_candidate():
@@ -44,7 +45,7 @@ def test_pareto_front_removes_dominated_candidate():
 
 
 def test_selection_is_deterministic_and_prefers_pareto_candidates():
-    candidates = [candidate("a"), candidate("b"), candidate("c")]
+    candidates = [candidate("a"), candidate("b"), candidate("c", payload_value=2)]
     evaluations = [
         evaluation("a", 1.0, drawdown=0.20, pass_rate=0.80),
         evaluation("b", 1.5, drawdown=0.10, pass_rate=0.90),
@@ -53,6 +54,32 @@ def test_selection_is_deterministic_and_prefers_pareto_candidates():
     policy = SelectionPolicy(population_size=2)
     selected = select_population(candidates, evaluations, policy)
     assert [item.strategy_id for item in selected] == ["b", "c"]
+
+
+def test_selection_diversity_can_prefer_structurally_distinct_candidate():
+    candidates = [candidate("best"), candidate("clone"), candidate("different", payload_value=2)]
+    evaluations = [
+        evaluation("best", 2.0),
+        evaluation("clone", 1.9),
+        evaluation("different", 1.0),
+    ]
+    selected = select_population(
+        candidates,
+        evaluations,
+        SelectionPolicy(population_size=2, min_genome_distance=0.5),
+    )
+    assert [item.strategy_id for item in selected] == ["best", "different"]
+
+
+def test_selection_falls_back_when_diversity_threshold_is_impossible():
+    candidates = [candidate("a"), candidate("b")]
+    evaluations = [evaluation("a", 1.0), evaluation("b", 0.9)]
+    selected = select_population(
+        candidates,
+        evaluations,
+        SelectionPolicy(population_size=2, min_genome_distance=1.0),
+    )
+    assert [item.strategy_id for item in selected] == ["a", "b"]
 
 
 def test_selection_applies_hard_gates():
@@ -77,3 +104,5 @@ def test_selection_validates_population_policy():
         SelectionPolicy(population_size=0)
     with pytest.raises(ValueError, match="pass_rate"):
         SelectionPolicy(population_size=1, min_monte_carlo_pass_rate=1.1)
+    with pytest.raises(ValueError, match="genome_distance"):
+        SelectionPolicy(population_size=1, min_genome_distance=1.1)
