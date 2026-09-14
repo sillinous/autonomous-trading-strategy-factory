@@ -38,8 +38,7 @@ def _canonical_digest(value: Any) -> str:
 
 
 def _candidate_record(candidate: Candidate, generation: int, evaluation: Any, seed: int) -> CandidateProvenance:
-    parents = tuple(getattr(candidate, "parent_strategy_ids", ()) or ())
-    genome = getattr(candidate, "genome", candidate)
+    parents = tuple(candidate.lineage.parent_ids)
     evaluation_payload = {
         "candidate_id": getattr(evaluation, "candidate_id", candidate.strategy_id),
         "fitness": getattr(getattr(evaluation, "fitness", None), "score", None),
@@ -49,7 +48,7 @@ def _candidate_record(candidate: Candidate, generation: int, evaluation: Any, se
         strategy_id=candidate.strategy_id,
         generation=generation,
         parent_strategy_ids=parents,
-        genome_digest=_canonical_digest(genome),
+        genome_digest=_canonical_digest(candidate.strategy),
         evaluation_digest=_canonical_digest(evaluation_payload),
         research_seed=seed,
     )
