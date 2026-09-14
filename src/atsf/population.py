@@ -95,3 +95,87 @@ def seed_population(strategies: list[StrategySpec]) -> list[Candidate]:
         seen.add(candidate_id)
         candidates.append(Candidate(strategy, candidate_id, LineageRecord(candidate_id, 0)))
     return candidates
+
+
+def evolve_population(
+    parents: list[Candidate],
+    target_size: int,
+    rng: Random,
+    *,
+    crossover_rate: float = 0.5,
+    mutation_rate: float = 0.5,
+    elite_count: int = 0,
+) -> list[Candidate]:
+    """Produce a deterministic next generation from an already-selected parent pool.
+
+    Selection is deliberately outside this function: callers provide the parent pool,
+    while this controller performs only variation, uniqueness, and lineage accounting.
+    Elites are copied unchanged when requested; all other children must be novel.
+    """
+    if not parents:
+        raise ValueError("parent population must not be empty")
+    if target_size <= 0:
+        raise ValueError("target_size must be positive")
+    if elite_count < 0 or elite_count > target_size:
+        raise ValueError("elite_count must be between 0 and target_size")
+    if not 0.0 <= crossover_rate <= 1.0:
+        raise ValueError("crossover_rate must be between 0 and 1")
+    if not 0.0 <= mutation_rate <= 1.0:
+        raise ValueError("mutation_rate must be between 0 and 1")
+    if crossover_rate + mutation_rate <= 0.0 and elite_count < target_size:
+        raise ValueError("at least one variation rate must be positive")
+    if crossover_rate > 0.0 and len(parents) < 2 and mutation_rate == 0.0:
+        raise ValueError("crossover requires at least two parents")
+
+    unique_parents: list[Candidate] = []
+    seen: set[str] = set()
+    for parent in parents:
+        if parent.strategy_id not in seen:
+            unique_parents.append(parent)
+            seen.add(parent.strategy_id)
+    if not unique_parents:
+        raise ValueError("parent population must contain valid candidates")
+
+    population: list[Candidate] = []
+    occupied = set()
+    elite_limit = min(elite_count, len(unique_parents))
+    for parent in unique_parents[:elite_limit]:
+        population.append(parent)
+        occupied.add(parent.strategy_id)
+
+    max_attempts = max(100, target_size * 50)
+    attempts = 0
+    while len(population) < target_size and attempts < max_attempts:
+        attempts += 1
+        roll = rng.random()
+        choose_crossover = (
+            crossover_rate > 0.0
+            and len(unique_parents) >= 2
+            and roll < crossover_rate
+        )
+        if choose_crossover:
+            first, second = rng.sample(unique_parents, 2)
+            child = crossover_candidate(first, second, rng)
+        elif mutation_rate > 0.0:
+            parent = rng.choice(unique_parents)
+            try:
+                child = mutate_candidate(parent, rng)
+            except ValueError:
+                if crossover_rate <= 0.0 or len(unique_parents) < 2:
+                    continue
+                first, second = rng.sample(unique_parents, 2)
+                child = crossover_candidate(first, second, rng)
+        else:
+            if crossover_rate <= 0.0 or len(unique_parents) < 2:
+                continue
+            first, second = rng.sample(unique_parents, 2)
+            child = crossover_candidate(first, second, rng)
+
+        if child.strategy_id in occupied:
+            continue
+        population.append(child)
+        occupied.add(child.strategy_id)
+
+    if len(population) != target_size:
+        raise ValueError("unable to produce a unique population with the configured variation operators")
+    return population
