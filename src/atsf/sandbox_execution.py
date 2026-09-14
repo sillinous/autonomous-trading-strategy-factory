@@ -179,10 +179,6 @@ class SandboxExecutionAdapter:
             )
         if not isfinite(now):
             raise ValueError("now must be finite")
-        if self._journal is None:
-            return self._execute_in_transaction(
-                intent, certificate, market, now=now, kill_switch_engaged=kill_switch_engaged
-            )
         with self._store.transaction():
             return self._execute_in_transaction(
                 intent, certificate, market, now=now, kill_switch_engaged=kill_switch_engaged
