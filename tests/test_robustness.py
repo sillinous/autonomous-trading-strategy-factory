@@ -95,8 +95,10 @@ def test_robustness_uses_complete_entry_exit_lifecycle(monkeypatch):
         return BacktestResult(
             equity=equity,
             returns=equity.pct_change().fillna(0.0),
+            trades=pd.DataFrame(columns=["timestamp", "action"]),
+            total_return=0.2,
+            max_drawdown=0.0,
             trade_returns=(0.1, 0.0909),
-            trades=2,
         )
 
     monkeypatch.setattr(robustness, "strategy_signals", fake_signals)
