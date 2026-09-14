@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+from collections.abc import Iterator
 import json
 from math import isfinite
 
@@ -45,6 +47,12 @@ class LiveExecutionIntentStore:
             )"""
         )
         self._connection.commit()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Share one SQLite transaction with coordinated execution journals."""
+        with self._connection:
+            yield
 
     @staticmethod
     def _payload(record: ExecutionIntentRecord) -> str:
@@ -126,7 +134,7 @@ class LiveExecutionIntentStore:
             )
         return candidate
 
-    def consume(
+    def consume_in_transaction(
         self,
         intent: LiveExecutionIntent,
         certificate: LiveRiskCertificate,
@@ -134,7 +142,7 @@ class LiveExecutionIntentStore:
         now: float,
         kill_switch_engaged: bool = False,
     ) -> ExecutionIntentRecord:
-        """Atomically mark an admitted intent consumed; no broker call is performed."""
+        """Consume without committing, for a caller coordinating multiple journals."""
         if not verify_execution_intent(intent):
             raise ValueError("execution intent fingerprint is invalid")
         if certificate.fingerprint != intent.certificate_fingerprint:
@@ -157,13 +165,32 @@ class LiveExecutionIntentStore:
             raise ValueError("journaled execution intent fingerprint mismatch")
         if current.status != "CREATED":
             raise ValueError(f"execution intent is already {current.status.lower()}")
-        with self._connection:
-            updated = self._connection.execute(
-                """UPDATE live_execution_intents
-                   SET status = 'CONSUMED', updated_at = ?, reason = 'consumed'
-                 WHERE intent_id = ? AND intent_fingerprint = ? AND status = 'CREATED'""",
-                (now, intent.intent_id, intent.fingerprint),
+        updated = self._connection.execute(
+            """UPDATE live_execution_intents
+               SET status = 'CONSUMED', updated_at = ?, reason = 'consumed'
+             WHERE intent_id = ? AND intent_fingerprint = ? AND status = 'CREATED'""",
+            (now, intent.intent_id, intent.fingerprint),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("execution intent could not be consumed atomically")
+        record = self.get(intent.intent_id)
+        if record is None:
+            raise ValueError("consumed execution intent could not be reloaded")
+        return record
+
+    def consume(
+        self,
+        intent: LiveExecutionIntent,
+        certificate: LiveRiskCertificate,
+        *,
+        now: float,
+        kill_switch_engaged: bool = False,
+    ) -> ExecutionIntentRecord:
+        """Atomically mark an admitted intent consumed; no broker call is performed."""
+        with self.transaction():
+            return self.consume_in_transaction(
+                intent,
+                certificate,
+                now=now,
+                kill_switch_engaged=kill_switch_engaged,
             )
-            if updated.rowcount != 1:
-                raise ValueError("execution intent could not be consumed atomically")
-        return self.get(intent.intent_id)
