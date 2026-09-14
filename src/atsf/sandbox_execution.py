@@ -5,7 +5,7 @@ from enum import Enum
 from math import isfinite
 
 from .live_execution_intent import LiveExecutionIntent, verify_execution_intent
-from .live_execution_intent_store import ExecutionIntentRecord, LiveExecutionIntentStore
+from .live_execution_intent_store import LiveExecutionIntentStore
 from .live_risk_gateway import LiveRiskCertificate, validate_live_risk_certificate
 
 
