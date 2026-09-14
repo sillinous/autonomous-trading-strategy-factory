@@ -19,8 +19,26 @@ class ExecutionEvent:
     detail: str = ""
 
 
+_ALLOWED_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
+    ExecutionState.CREATED: frozenset(
+        {ExecutionState.VALIDATED, ExecutionState.REJECTED, ExecutionState.CANCELLED, ExecutionState.EXPIRED}
+    ),
+    ExecutionState.VALIDATED: frozenset(
+        {ExecutionState.ADMITTED, ExecutionState.REJECTED, ExecutionState.CANCELLED, ExecutionState.EXPIRED}
+    ),
+    ExecutionState.ADMITTED: frozenset(
+        {ExecutionState.CONSUMED, ExecutionState.REJECTED, ExecutionState.CANCELLED, ExecutionState.EXPIRED}
+    ),
+    ExecutionState.CONSUMED: frozenset({ExecutionState.FILLED, ExecutionState.REJECTED, ExecutionState.EXPIRED}),
+    ExecutionState.FILLED: frozenset(),
+    ExecutionState.REJECTED: frozenset(),
+    ExecutionState.CANCELLED: frozenset(),
+    ExecutionState.EXPIRED: frozenset(),
+}
+
+
 class SandboxExecutionJournal:
-    """Append-only SQLite event journal for deterministic sandbox recovery."""
+    """Append-only SQLite event journal with fail-closed state-machine enforcement."""
 
     def __init__(self, registry: ExperimentRegistry) -> None:
         self._connection = registry._connection
@@ -66,7 +84,17 @@ class SandboxExecutionJournal:
         if not isfinite(timestamp):
             raise ValueError("timestamp must be finite")
         previous = self.latest(intent_id)
-        sequence = 1 if previous is None else previous.sequence + 1
+        if previous is None:
+            if state is not ExecutionState.CREATED:
+                raise ValueError("first execution event must be CREATED")
+            sequence = 1
+        else:
+            allowed = _ALLOWED_TRANSITIONS[previous.state]
+            if state not in allowed:
+                raise ValueError(
+                    f"invalid execution transition: {previous.state.value} -> {state.value}"
+                )
+            sequence = previous.sequence + 1
         event = ExecutionEvent(
             intent_id=intent_id,
             sequence=sequence,
@@ -119,12 +147,19 @@ class SandboxExecutionJournal:
 
     def verify(self, intent_id: str) -> bool:
         previous_sequence = 0
+        previous_state: ExecutionState | None = None
         for event in self.events(intent_id):
             if event.sequence != previous_sequence + 1:
+                return False
+            if previous_state is None:
+                if event.state is not ExecutionState.CREATED:
+                    return False
+            elif event.state not in _ALLOWED_TRANSITIONS[previous_state]:
                 return False
             if event.event_fingerprint != self._fingerprint(
                 event.intent_id, event.sequence, event.state, event.timestamp, event.detail
             ):
                 return False
             previous_sequence = event.sequence
+            previous_state = event.state
         return True
