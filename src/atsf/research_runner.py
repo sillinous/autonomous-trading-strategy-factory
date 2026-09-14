@@ -5,6 +5,7 @@ from typing import Callable
 
 from .adaptive_evolution import AdaptiveEvolutionPolicy
 from .population import Candidate
+from .research_checkpoint import ResearchCheckpoint
 from .research_cycle import ResearchCyclePolicy, ResearchCycleResult, run_research_cycle
 from .research_history import ResearchHistory
 from .research_provenance import GenerationProvenance, build_generation_provenance
@@ -34,6 +35,7 @@ class ResearchRunResult:
     history: ResearchHistory
     generations: tuple[ResearchCycleResult, ...]
     provenance: tuple[GenerationProvenance, ...]
+    checkpoints: tuple[ResearchCheckpoint, ...]
     final_population: tuple[Candidate, ...]
     stopped_on_stagnation: bool
 
@@ -55,6 +57,7 @@ def run_research(
     history = ResearchHistory()
     results: list[ResearchCycleResult] = []
     provenance: list[GenerationProvenance] = []
+    checkpoints: list[ResearchCheckpoint] = []
     current = list(population)
     stopped = False
 
@@ -74,23 +77,35 @@ def run_research(
             current,
             improvement_epsilon=run_policy.improvement_epsilon,
         )
-        provenance.append(
-            build_generation_provenance(result, current, seed=generation_seed)
+        generation_provenance = build_generation_provenance(
+            result, current, seed=generation_seed
         )
+        provenance.append(generation_provenance)
         results.append(result)
         current = list(result.next_population)
 
-        if (
+        stopped = (
             run_policy.stop_on_stagnation is not None
             and history.is_stagnating(run_policy.stop_on_stagnation)
-        ):
-            stopped = True
+        )
+        checkpoints.append(
+            ResearchCheckpoint(
+                next_generation=generation + 1,
+                next_seed=seed + generation + 1,
+                population=tuple(current),
+                history=history,
+                provenance=tuple(provenance),
+                stopped=stopped,
+            )
+        )
+        if stopped:
             break
 
     return ResearchRunResult(
         history=history,
         generations=tuple(results),
         provenance=tuple(provenance),
+        checkpoints=tuple(checkpoints),
         final_population=tuple(current),
         stopped_on_stagnation=stopped,
     )
