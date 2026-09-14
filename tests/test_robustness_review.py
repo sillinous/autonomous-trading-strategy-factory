@@ -66,6 +66,12 @@ def make_evaluation(candidate: Candidate):
     )
 
 
+def with_field(evaluation, field, value):
+    values = vars(evaluation).copy()
+    values[field] = value
+    return SimpleNamespace(**values)
+
+
 def make_schedule(generation=1, action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW):
     return ResearchSchedule(
         action=action,
@@ -119,8 +125,11 @@ def test_robustness_review_rejects_scheduler_not_ready():
 def test_robustness_review_rejects_failed_robustness():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    failed_robustness = replace(evaluation.robustness, passed=False)
-    evaluation = SimpleNamespace(**vars(evaluation), robustness=failed_robustness)
+    evaluation = with_field(
+        evaluation,
+        "robustness",
+        replace(evaluation.robustness, passed=False),
+    )
     provenance = make_provenance(candidate, evaluation)
 
     review = review_robustness(candidate, evaluation, make_schedule(), provenance)
@@ -144,9 +153,7 @@ def test_robustness_review_rejects_tampered_provenance():
 def test_robustness_review_rejects_noneligible_candidate():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    evaluation = SimpleNamespace(
-        **vars(evaluation), promotion=SimpleNamespace(eligible=False)
-    )
+    evaluation = with_field(evaluation, "promotion", SimpleNamespace(eligible=False))
     provenance = make_provenance(candidate, evaluation)
 
     review = review_robustness(candidate, evaluation, make_schedule(), provenance)
@@ -158,8 +165,10 @@ def test_robustness_review_rejects_noneligible_candidate():
 def test_robustness_review_rejects_nonfinite_evidence():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    evaluation = SimpleNamespace(
-        **vars(evaluation), walk_forward=SimpleNamespace(oos_sharpe=float("nan"))
+    evaluation = with_field(
+        evaluation,
+        "walk_forward",
+        SimpleNamespace(oos_sharpe=float("nan")),
     )
     provenance = make_provenance(candidate, evaluation)
 
