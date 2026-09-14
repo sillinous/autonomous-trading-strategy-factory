@@ -11,7 +11,7 @@ from .research_history import GenerationRecord, ResearchHistory
 from .research_provenance import CandidateProvenance, GenerationProvenance
 from .strategy import StrategySpec
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def _canonical_json(value: Any) -> str:
@@ -92,7 +92,7 @@ class ResearchCheckpoint:
             population = tuple(_candidate_from_dict(item) for item in state["population"])
             history = ResearchHistory(
                 records=tuple(GenerationRecord(**item) for item in state["history"]),
-                known_strategy_ids=frozenset(state.get("known_strategy_ids", ())),
+                known_strategy_ids=frozenset(state["known_strategy_ids"]),
             )
             provenance = tuple(_provenance_from_dict(item) for item in state["provenance"])
             return cls(
