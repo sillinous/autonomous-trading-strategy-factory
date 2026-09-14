@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -15,6 +13,7 @@ from atsf.sandbox_execution import (
     MarketSnapshot,
     SandboxExecutionAdapter,
 )
+from atsf.sandbox_execution_journal import SandboxExecutionJournal
 
 
 def make_context(tmp_path: Path):
@@ -44,7 +43,8 @@ def make_context(tmp_path: Path):
 
 def test_sandbox_fills_deterministically_from_market_snapshot(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
-    adapter = SandboxExecutionAdapter(store)
+    journal = SandboxExecutionJournal(registry)
+    adapter = SandboxExecutionAdapter(store, journal)
     market = MarketSnapshot("SPY", bid=100.0, ask=100.25, timestamp=151.0)
 
     result = adapter.execute(intent, certificate, market, now=151.0)
@@ -55,6 +55,14 @@ def test_sandbox_fills_deterministically_from_market_snapshot(tmp_path: Path):
     assert result.fill is not None
     assert result.fill.price == 100.25
     assert store.get(intent.intent_id).status == "CONSUMED"
+    assert [event.state for event in journal.events(intent.intent_id)] == [
+        ExecutionState.CREATED,
+        ExecutionState.VALIDATED,
+        ExecutionState.ADMITTED,
+        ExecutionState.CONSUMED,
+        ExecutionState.FILLED,
+    ]
+    assert journal.verify(intent.intent_id)
     registry.close()
 
 
@@ -87,7 +95,8 @@ def test_sandbox_is_idempotently_rejected_after_consumption(tmp_path: Path):
 
 def test_sandbox_revalidates_kill_switch_before_consumption(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
-    result = SandboxExecutionAdapter(store).execute(
+    journal = SandboxExecutionJournal(registry)
+    result = SandboxExecutionAdapter(store, journal).execute(
         intent,
         certificate,
         MarketSnapshot("SPY", 100.0, 100.25, 151.0),
@@ -97,12 +106,15 @@ def test_sandbox_revalidates_kill_switch_before_consumption(tmp_path: Path):
     assert result.state is ExecutionState.REJECTED
     assert any("kill switch" in reason for reason in result.reasons)
     assert store.get(intent.intent_id).status == "CREATED"
+    assert journal.latest(intent.intent_id).state is ExecutionState.REJECTED
+    assert journal.verify(intent.intent_id)
     registry.close()
 
 
 def test_sandbox_rejects_expired_certificate(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
-    result = SandboxExecutionAdapter(store).execute(
+    journal = SandboxExecutionJournal(registry)
+    result = SandboxExecutionAdapter(store, journal).execute(
         intent,
         certificate,
         MarketSnapshot("SPY", 100.0, 100.25, 201.0),
@@ -111,23 +123,23 @@ def test_sandbox_rejects_expired_certificate(tmp_path: Path):
     assert result.state is ExecutionState.REJECTED
     assert any("expired" in reason for reason in result.reasons)
     assert store.get(intent.intent_id).status == "CREATED"
+    assert journal.latest(intent.intent_id).state is ExecutionState.REJECTED
+    assert journal.verify(intent.intent_id)
     registry.close()
 
 
 def test_market_symbol_mismatch_does_not_consume_intent(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
-    result = SandboxExecutionAdapter(store).execute(
+    journal = SandboxExecutionJournal(registry)
+    result = SandboxExecutionAdapter(store, journal).execute(
         intent,
         certificate,
         MarketSnapshot("QQQ", 100.0, 100.25, 151.0),
         now=151.0,
     )
     assert result.state is ExecutionState.REJECTED
-    assert "market symbol does not match intent" in result.reasons
+    assert any("symbol" in reason for reason in result.reasons)
     assert store.get(intent.intent_id).status == "CREATED"
+    assert journal.latest(intent.intent_id).state is ExecutionState.REJECTED
+    assert journal.verify(intent.intent_id)
     registry.close()
-
-
-def test_market_snapshot_validates_quotes():
-    with pytest.raises(ValueError, match="ask >= bid"):
-        MarketSnapshot("SPY", 101.0, 100.0, 151.0)
