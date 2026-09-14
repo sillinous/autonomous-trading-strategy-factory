@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from atsf.adaptive_evolution import AdaptiveEvolutionPolicy
 from atsf.research_cycle import ResearchCyclePolicy, run_research_cycle
+from atsf.research_history import GenerationRecord, ResearchHistory
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
 
@@ -45,6 +47,9 @@ def test_research_cycle_evaluates_selects_and_evolves():
     assert result.metrics.candidate_count == 3
     assert result.metrics.selected_count == 2
     assert result.metrics.promoted_count == 3
+    assert result.metrics.crossover_rate == 0.5
+    assert result.metrics.mutation_rate == 0.5
+    assert not result.metrics.stagnating
     assert result.next_population[0].strategy_id == result.selected_parents[0].strategy_id
 
 
@@ -57,6 +62,41 @@ def test_research_cycle_is_reproducible():
         item.strategy_id for item in second.next_population
     ]
     assert first.metrics == second.metrics
+
+
+def test_research_cycle_adapts_rates_from_stagnating_history():
+    history = ResearchHistory(
+        records=tuple(
+            GenerationRecord(
+                generation=index,
+                candidate_count=2,
+                selected_count=2,
+                promoted_count=2,
+                best_fitness=1.0,
+                mean_fitness=0.8,
+                mean_genome_distance=0.5,
+                min_genome_distance=0.2,
+                max_genome_distance=0.8,
+                unique_strategy_count=2,
+                new_strategy_count=1,
+                best_strategy_id=f"strategy-{index}",
+                generations_without_improvement=index,
+            )
+            for index in range(4)
+        )
+    )
+    result = run_research_cycle(
+        make_parent_population(),
+        fake_evaluation,
+        generation=4,
+        seed=7,
+        policy=policy(),
+        history=history,
+        adaptive_policy=AdaptiveEvolutionPolicy(stagnation_threshold=3),
+    )
+    assert result.metrics.stagnating
+    assert result.metrics.crossover_rate == pytest.approx(0.45)
+    assert result.metrics.mutation_rate == pytest.approx(0.60)
 
 
 def test_research_cycle_rejects_duplicate_population_ids():
