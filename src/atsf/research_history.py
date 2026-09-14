@@ -3,10 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 from math import isfinite
+from typing import TYPE_CHECKING
 
 from .genome import genome_distance
 from .population import Candidate
-from .research_cycle import ResearchCycleResult
+
+if TYPE_CHECKING:
+    from .research_cycle import ResearchCycleResult
 
 
 @dataclass(frozen=True)
