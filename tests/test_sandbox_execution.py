@@ -30,12 +30,8 @@ def make_context(tmp_path: Path):
         authorization, issued_at=100.0, expires_at=200.0, nonce="nonce-1"
     )
     intent = build_execution_intent(
-        certificate,
-        intent_id="intent-1",
-        symbol="SPY",
-        side="BUY",
-        quantity_fraction=0.02,
-        now=150.0,
+        certificate, intent_id="intent-1", symbol="SPY", side="BUY",
+        quantity_fraction=0.02, now=150.0,
     )
     store.record(intent, now=150.0)
     return registry, store, certificate, intent
@@ -44,23 +40,17 @@ def make_context(tmp_path: Path):
 def test_sandbox_fills_deterministically_from_market_snapshot(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
     journal = SandboxExecutionJournal(registry)
-    adapter = SandboxExecutionAdapter(store, journal)
-    market = MarketSnapshot("SPY", bid=100.0, ask=100.25, timestamp=151.0)
-
-    result = adapter.execute(intent, certificate, market, now=151.0)
-
+    result = SandboxExecutionAdapter(store, journal).execute(
+        intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 151.0), now=151.0
+    )
     assert result.mode is ExecutionMode.SANDBOX
     assert result.state is ExecutionState.FILLED
     assert result.execution_authority is False
-    assert result.fill is not None
-    assert result.fill.price == 100.25
+    assert result.fill is not None and result.fill.price == 100.25
     assert store.get(intent.intent_id).status == "CONSUMED"
     assert [event.state for event in journal.events(intent.intent_id)] == [
-        ExecutionState.CREATED,
-        ExecutionState.VALIDATED,
-        ExecutionState.ADMITTED,
-        ExecutionState.CONSUMED,
-        ExecutionState.FILLED,
+        ExecutionState.CREATED, ExecutionState.VALIDATED, ExecutionState.ADMITTED,
+        ExecutionState.CONSUMED, ExecutionState.FILLED,
     ]
     assert journal.verify(intent.intent_id)
     registry.close()
@@ -69,11 +59,8 @@ def test_sandbox_fills_deterministically_from_market_snapshot(tmp_path: Path):
 def test_sandbox_rejects_live_mode(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
     result = SandboxExecutionAdapter(store).execute(
-        intent,
-        certificate,
-        MarketSnapshot("SPY", 100.0, 100.25, 151.0),
-        now=151.0,
-        mode=ExecutionMode.LIVE,
+        intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 151.0),
+        now=151.0, mode=ExecutionMode.LIVE,
     )
     assert result.state is ExecutionState.REJECTED
     assert "live execution mode is disabled" in result.reasons
@@ -97,11 +84,8 @@ def test_sandbox_revalidates_kill_switch_before_consumption(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
     journal = SandboxExecutionJournal(registry)
     result = SandboxExecutionAdapter(store, journal).execute(
-        intent,
-        certificate,
-        MarketSnapshot("SPY", 100.0, 100.25, 151.0),
-        now=151.0,
-        kill_switch_engaged=True,
+        intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 151.0),
+        now=151.0, kill_switch_engaged=True,
     )
     assert result.state is ExecutionState.REJECTED
     assert any("kill switch" in reason for reason in result.reasons)
@@ -115,10 +99,7 @@ def test_sandbox_rejects_expired_certificate(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
     journal = SandboxExecutionJournal(registry)
     result = SandboxExecutionAdapter(store, journal).execute(
-        intent,
-        certificate,
-        MarketSnapshot("SPY", 100.0, 100.25, 201.0),
-        now=201.0,
+        intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 201.0), now=201.0
     )
     assert result.state is ExecutionState.REJECTED
     assert any("expired" in reason for reason in result.reasons)
@@ -132,10 +113,7 @@ def test_market_symbol_mismatch_does_not_consume_intent(tmp_path: Path):
     registry, store, certificate, intent = make_context(tmp_path)
     journal = SandboxExecutionJournal(registry)
     result = SandboxExecutionAdapter(store, journal).execute(
-        intent,
-        certificate,
-        MarketSnapshot("QQQ", 100.0, 100.25, 151.0),
-        now=151.0,
+        intent, certificate, MarketSnapshot("QQQ", 100.0, 100.25, 151.0), now=151.0
     )
     assert result.state is ExecutionState.REJECTED
     assert any("symbol" in reason for reason in result.reasons)
@@ -143,3 +121,48 @@ def test_market_symbol_mismatch_does_not_consume_intent(tmp_path: Path):
     assert journal.latest(intent.intent_id).state is ExecutionState.REJECTED
     assert journal.verify(intent.intent_id)
     registry.close()
+
+
+def test_transaction_rolls_back_intent_and_events_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    registry, store, certificate, intent = make_context(tmp_path)
+    journal = SandboxExecutionJournal(registry)
+    adapter = SandboxExecutionAdapter(store, journal)
+    original = journal.append_in_transaction
+
+    def fail_on_fill(intent_id, state, *, timestamp, detail=""):
+        if state is ExecutionState.FILLED:
+            raise RuntimeError("simulated journal failure")
+        return original(intent_id, state, timestamp=timestamp, detail=detail)
+
+    monkeypatch.setattr(journal, "append_in_transaction", fail_on_fill)
+    with pytest.raises(RuntimeError, match="simulated journal failure"):
+        adapter.execute(
+            intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 151.0), now=151.0
+        )
+    assert store.get(intent.intent_id).status == "CREATED"
+    assert journal.events(intent.intent_id) == ()
+    assert journal.verify(intent.intent_id)
+    registry.close()
+
+
+def test_transaction_commits_intent_and_event_journals_as_one_unit(tmp_path: Path):
+    registry, store, certificate, intent = make_context(tmp_path)
+    journal = SandboxExecutionJournal(registry)
+    result = SandboxExecutionAdapter(store, journal).execute(
+        intent, certificate, MarketSnapshot("SPY", 100.0, 100.25, 151.0), now=151.0
+    )
+    assert result.state is ExecutionState.FILLED
+    assert store.get(intent.intent_id).status == "CONSUMED"
+    assert journal.latest(intent.intent_id).state is ExecutionState.FILLED
+    assert journal.verify(intent.intent_id)
+    registry.close()
+
+    reopened = ExperimentRegistry(tmp_path / "research.db")
+    reopened_store = LiveExecutionIntentStore(reopened)
+    reopened_journal = SandboxExecutionJournal(reopened)
+    assert reopened_store.get(intent.intent_id).status == "CONSUMED"
+    assert reopened_journal.latest(intent.intent_id).state is ExecutionState.FILLED
+    assert reopened_journal.verify(intent.intent_id)
+    reopened.close()
