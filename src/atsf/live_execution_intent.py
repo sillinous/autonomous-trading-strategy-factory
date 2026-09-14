@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from math import isfinite
@@ -81,10 +81,17 @@ def build_execution_intent(
         certificate_fingerprint=certificate.fingerprint,
         fingerprint="",
     )
-    return LiveExecutionIntent(
-        **{**intent.__dict__, "fingerprint": _intent_fingerprint(**{k: getattr(intent, k) for k in (
-            "intent_id", "strategy_id", "symbol", "side", "quantity_fraction", "created_at", "certificate_fingerprint"
-        )})}
+    return replace(
+        intent,
+        fingerprint=_intent_fingerprint(
+            intent.intent_id,
+            intent.strategy_id,
+            intent.symbol,
+            intent.side,
+            intent.quantity_fraction,
+            intent.created_at,
+            intent.certificate_fingerprint,
+        ),
     )
 
 
