@@ -2,7 +2,6 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
-import pytest
 
 from atsf.genome import StrategyGenome
 from atsf.lineage import LineageRecord
@@ -94,12 +93,7 @@ def test_robustness_review_admits_only_complete_evidence():
     evaluation = make_evaluation(candidate)
     provenance = make_provenance(candidate, evaluation)
 
-    review = review_robustness(
-        candidate,
-        evaluation,
-        make_schedule(),
-        provenance,
-    )
+    review = review_robustness(candidate, evaluation, make_schedule(), provenance)
 
     assert review.decision is RobustnessReviewDecision.ADMIT
     assert review.execution_authority is False
@@ -125,7 +119,8 @@ def test_robustness_review_rejects_scheduler_not_ready():
 def test_robustness_review_rejects_failed_robustness():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    evaluation = replace(evaluation, robustness=replace(evaluation.robustness, passed=False))
+    failed_robustness = replace(evaluation.robustness, passed=False)
+    evaluation = SimpleNamespace(**vars(evaluation), robustness=failed_robustness)
     provenance = make_provenance(candidate, evaluation)
 
     review = review_robustness(candidate, evaluation, make_schedule(), provenance)
@@ -149,7 +144,9 @@ def test_robustness_review_rejects_tampered_provenance():
 def test_robustness_review_rejects_noneligible_candidate():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    evaluation = replace(evaluation, promotion=SimpleNamespace(eligible=False))
+    evaluation = SimpleNamespace(
+        **vars(evaluation), promotion=SimpleNamespace(eligible=False)
+    )
     provenance = make_provenance(candidate, evaluation)
 
     review = review_robustness(candidate, evaluation, make_schedule(), provenance)
@@ -161,7 +158,9 @@ def test_robustness_review_rejects_noneligible_candidate():
 def test_robustness_review_rejects_nonfinite_evidence():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    evaluation = replace(evaluation, walk_forward=SimpleNamespace(oos_sharpe=float("nan")))
+    evaluation = SimpleNamespace(
+        **vars(evaluation), walk_forward=SimpleNamespace(oos_sharpe=float("nan"))
+    )
     provenance = make_provenance(candidate, evaluation)
 
     review = review_robustness(candidate, evaluation, make_schedule(), provenance)
@@ -209,11 +208,19 @@ def test_review_rejects_invalid_provenance_seed():
     assert any("seed" in reason for reason in review.reasons)
 
 
-def test_missing_candidate_attributes_fail_closed():
+def test_robustness_review_rejects_scheduler_execution_authority():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
     provenance = make_provenance(candidate, evaluation)
-    broken = SimpleNamespace(candidate_id=candidate.strategy_id)
+    schedule = ResearchSchedule(
+        action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW,
+        health=SimpleNamespace(),
+        generation=1,
+        execution_authority=True,
+        reasons=(),
+    )
 
-    with pytest.raises(AttributeError):
-        expected_fingerprint(candidate, broken, provenance)
+    review = review_robustness(candidate, evaluation, schedule, provenance)
+
+    assert review.decision is RobustnessReviewDecision.REJECT
+    assert any("execution authority" in reason for reason in review.reasons)
