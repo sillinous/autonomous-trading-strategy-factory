@@ -42,7 +42,7 @@ class GenerationMetrics:
 
     generation: int
     candidate_count: int
-    eligible_count: int
+    promotion_eligible_count: int
     selected_count: int
     promoted_count: int
     best_fitness: float
@@ -50,6 +50,11 @@ class GenerationMetrics:
     crossover_rate: float
     mutation_rate: float
     stagnating: bool
+
+    @property
+    def eligible_count(self) -> int:
+        """Backward-compatible alias for promotion eligibility."""
+        return self.promotion_eligible_count
 
 
 @dataclass(frozen=True)
@@ -111,13 +116,15 @@ def run_research_cycle(
         )
     )
 
-    eligible = [evaluation for evaluation in evaluations if evaluation.promotion.eligible]
-    promoted = len(eligible)
+    promotion_eligible = [
+        evaluation for evaluation in evaluations if evaluation.promotion.eligible
+    ]
+    promoted = len(promotion_eligible)
     fitness_values = [evaluation.fitness.score for evaluation in evaluations]
     metrics = GenerationMetrics(
         generation=generation,
         candidate_count=len(population),
-        eligible_count=len(eligible),
+        promotion_eligible_count=len(promotion_eligible),
         selected_count=len(selected),
         promoted_count=promoted,
         best_fitness=max(fitness_values),
