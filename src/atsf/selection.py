@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
+from .genome import genome_distance
 from .orchestrator import CandidateEvaluation
 from .population import Candidate
 
@@ -17,6 +18,7 @@ class SelectionPolicy:
     min_robustness_equity_ratio: float = 0.0
     min_monte_carlo_pass_rate: float = 0.0
     preserve_diversity: bool = True
+    min_genome_distance: float = 0.0
 
     def __post_init__(self) -> None:
         if self.population_size <= 0:
@@ -27,6 +29,8 @@ class SelectionPolicy:
             raise ValueError("min_robustness_equity_ratio must be between 0 and 1")
         if not 0 <= self.min_monte_carlo_pass_rate <= 1:
             raise ValueError("min_monte_carlo_pass_rate must be between 0 and 1")
+        if not 0 <= self.min_genome_distance <= 1:
+            raise ValueError("min_genome_distance must be between 0 and 1")
 
 
 def _robustness_ratio(evaluation: CandidateEvaluation) -> float:
@@ -102,6 +106,41 @@ def pareto_front(evaluations: list[CandidateEvaluation]) -> list[CandidateEvalua
     return sorted(front, key=_rank_key, reverse=True)
 
 
+def _select_diverse(
+    front: list[CandidateEvaluation],
+    by_id: dict[str, Candidate],
+    population_size: int,
+    minimum_distance: float,
+) -> list[str]:
+    """Select a quality-ranked max-min diverse subset of the Pareto front."""
+    if not front or population_size <= 0:
+        return []
+
+    selected: list[str] = [front[0].candidate_id]
+    while len(selected) < population_size:
+        options = [item for item in front if item.candidate_id not in selected]
+        if not options:
+            break
+
+        scored: list[tuple[float, tuple, str]] = []
+        for evaluation in options:
+            candidate = by_id[evaluation.candidate_id]
+            distances = [
+                genome_distance(candidate.strategy, by_id[selected_id].strategy)
+                for selected_id in selected
+            ]
+            minimum = min(distances)
+            scored.append((minimum, _rank_key(evaluation), evaluation.candidate_id))
+
+        admissible = [item for item in scored if item[0] >= minimum_distance]
+        if not admissible:
+            break
+        _, _, candidate_id = max(admissible, key=lambda item: (item[0], item[1], item[2]))
+        selected.append(candidate_id)
+
+    return selected
+
+
 def select_population(
     candidates: list[Candidate],
     evaluations: list[CandidateEvaluation],
@@ -136,9 +175,22 @@ def select_population(
             selected_set.add(evaluation.candidate_id)
             selected_ids.append(evaluation.candidate_id)
 
-    for evaluation in front:
-        add(evaluation)
+    if policy.preserve_diversity:
+        selected_ids.extend(
+            _select_diverse(
+                front,
+                by_id,
+                policy.population_size,
+                policy.min_genome_distance,
+            )
+        )
+        selected_set.update(selected_ids)
+    else:
+        for evaluation in front:
+            add(evaluation)
 
+    # Diversity is a preference, not a reason to fail a valid research cycle when
+    # the eligible pool cannot satisfy the configured distance threshold.
     remaining = sorted(
         (evaluation for evaluation in eligible if evaluation.candidate_id not in selected_set),
         key=_rank_key,
