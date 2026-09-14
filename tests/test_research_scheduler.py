@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from atsf.research_health import ResearchHealthDecision, ResearchHealthStatus
 from atsf.research_history import GenerationRecord, ResearchHistory
 from atsf.research_scheduler import (
@@ -89,8 +91,8 @@ def test_scheduler_increases_exploration_for_warning_health():
                 mean_genome_distance=0.01,
                 min_genome_distance=0.01,
                 max_genome_distance=0.02,
-                unique_strategy_count=4,
-                new_strategy_count=0,
+                unique_strategy_count=2,
+                new_strategy_count=1,
                 best_strategy_id="best",
                 generations_without_improvement=0,
             ),
@@ -115,9 +117,5 @@ def test_scheduler_pauses_on_critical_health():
 
 
 def test_scheduler_policy_validates_minimum_depth():
-    try:
+    with pytest.raises(ValueError, match="min_generations_before_review"):
         ResearchSchedulePolicy(min_generations_before_review=0)
-    except ValueError as exc:
-        assert "min_generations_before_review" in str(exc)
-    else:
-        raise AssertionError("expected invalid scheduling policy to fail")
