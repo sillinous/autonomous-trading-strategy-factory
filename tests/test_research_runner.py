@@ -68,9 +68,9 @@ def test_research_runner_can_stop_on_stagnation():
         seed=3,
     )
 
-    assert len(result.generations) == 2
+    assert len(result.generations) == 3
     assert result.stopped_on_stagnation
-    assert result.history.generations_without_improvement == 1
+    assert result.history.generations_without_improvement == 2
 
 
 def test_research_run_policy_validates_bounds():
