@@ -8,7 +8,13 @@ from atsf.generator import (
     mutate_signal_comparator,
     mutate_threshold,
 )
-from atsf.population import crossover_candidate, mutate_candidate, seed_population, strategy_id
+from atsf.population import (
+    crossover_candidate,
+    evolve_population,
+    mutate_candidate,
+    seed_population,
+    strategy_id,
+)
 from atsf.strategy import (
     Comparator,
     Condition,
@@ -30,6 +36,25 @@ def make_strategy() -> StrategySpec:
         position_sizing=PositionSizing(method="fixed_fraction", value=0.5, max_position=0.5),
         risk=RiskLimits(max_position=0.5),
     )
+
+
+def make_parent_population() -> list:
+    first = make_strategy()
+    second = make_strategy().model_copy(
+        update={
+            "name": "alternate",
+            "indicators": [Indicator(name="ema", period=10)],
+            "entry": Signal(all=[Condition(left="close", comparator=Comparator.GT, right=110)]),
+        }
+    )
+    third = make_strategy().model_copy(
+        update={
+            "name": "third",
+            "indicators": [Indicator(name="rsi", period=14)],
+            "entry": Signal(all=[Condition(left="close", comparator=Comparator.GT, right=120)]),
+        }
+    )
+    return seed_population([first, second, third])
 
 
 def test_seed_population_deduplicates():
@@ -124,3 +149,47 @@ def test_mutation_fails_closed_when_no_operator_is_applicable(monkeypatch):
     monkeypatch.setattr("atsf.population._applicable_mutations", lambda _: ())
     with pytest.raises(ValueError, match="no applicable mutation operators"):
         mutate_candidate(parent, Random(3))
+
+
+def test_evolve_population_is_reproducible_and_unique():
+    parents = make_parent_population()
+    first = evolve_population(parents, 10, Random(42), crossover_rate=0.5, mutation_rate=0.5)
+    second = evolve_population(parents, 10, Random(42), crossover_rate=0.5, mutation_rate=0.5)
+    assert [candidate.strategy_id for candidate in first] == [candidate.strategy_id for candidate in second]
+    assert len(first) == 10
+    assert len({candidate.strategy_id for candidate in first}) == 10
+
+
+def test_evolve_population_preserves_requested_elites():
+    parents = make_parent_population()
+    population = evolve_population(parents, 6, Random(8), elite_count=2)
+    assert population[:2] == parents[:2]
+    assert all(candidate.lineage.generation == 0 for candidate in population[:2])
+    assert all(candidate.lineage.generation == 1 for candidate in population[2:])
+
+
+def test_evolve_population_records_variation_lineage():
+    parents = make_parent_population()
+    population = evolve_population(parents, 8, Random(12), crossover_rate=1.0, mutation_rate=0.0)
+    children = population
+    assert all(child.lineage.parent_ids for child in children)
+    assert all(child.lineage.operator == "crossover" for child in children)
+    assert all(child.lineage.generation == 1 for child in children)
+
+
+def test_evolve_population_validates_configuration():
+    parents = make_parent_population()
+    with pytest.raises(ValueError, match="target_size"):
+        evolve_population(parents, 0, Random(1))
+    with pytest.raises(ValueError, match="crossover_rate"):
+        evolve_population(parents, 4, Random(1), crossover_rate=1.1)
+    with pytest.raises(ValueError, match="mutation_rate"):
+        evolve_population(parents, 4, Random(1), mutation_rate=-0.1)
+    with pytest.raises(ValueError, match="variation rate"):
+        evolve_population(parents, 4, Random(1), crossover_rate=0.0, mutation_rate=0.0)
+
+
+def test_evolve_population_fails_closed_when_crossover_has_one_parent():
+    parent = seed_population([make_strategy()])
+    with pytest.raises(ValueError, match="at least two parents"):
+        evolve_population(parent, 2, Random(2), crossover_rate=1.0, mutation_rate=0.0)
