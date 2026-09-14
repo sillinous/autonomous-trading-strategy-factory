@@ -112,19 +112,21 @@ def build_generation_provenance(
 ) -> GenerationProvenance:
     """Build a deterministic, serialization-friendly provenance manifest."""
     by_id = {candidate.strategy_id: candidate for candidate in population}
-    records = tuple(
-        _candidate_record(
-            by_id[evaluation.candidate_id],
-            result.generation,
-            evaluation,
-            seed,
+    records: list[CandidateProvenance] = []
+    for evaluation in result.evaluations:
+        candidate = by_id.get(evaluation.candidate_id)
+        if candidate is None:
+            raise ValueError(
+                "evaluation candidate_id does not match a candidate in the population"
+            )
+        records.append(
+            _candidate_record(candidate, result.generation, evaluation, seed)
         )
-        for evaluation in result.evaluations
-    )
+
     metrics = {
         "generation": result.metrics.generation,
         "candidate_count": result.metrics.candidate_count,
-        "eligible_count": result.metrics.eligible_count,
+        "promotion_eligible_count": result.metrics.promotion_eligible_count,
         "selected_count": result.metrics.selected_count,
         "promoted_count": result.metrics.promoted_count,
         "best_fitness": result.metrics.best_fitness,
@@ -135,7 +137,7 @@ def build_generation_provenance(
     }
     return GenerationProvenance(
         generation=result.generation,
-        candidate_records=records,
+        candidate_records=tuple(records),
         selected_strategy_ids=tuple(
             candidate.strategy_id for candidate in result.selected_parents
         ),
