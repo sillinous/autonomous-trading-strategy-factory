@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from atsf.research_cycle import ResearchCyclePolicy
-from atsf.research_runner import ResearchRunPolicy, run_research
+from atsf.research_runner import ResearchRunPolicy, resume_research, run_research
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
 
@@ -71,6 +71,86 @@ def test_research_runner_can_stop_on_stagnation():
     assert len(result.generations) == 3
     assert result.stopped_on_stagnation
     assert result.history.generations_without_improvement == 2
+
+
+def test_research_runner_resume_matches_uninterrupted_final_state():
+    population = make_parent_population()
+    uninterrupted = run_research(
+        population,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=5),
+        seed=17,
+    )
+    first_segment = run_research(
+        population,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=3),
+        seed=17,
+    )
+
+    checkpoint = first_segment.final_checkpoint
+    assert checkpoint is not None
+    assert checkpoint.next_generation == 3
+    assert checkpoint.next_seed == 20
+
+    resumed = resume_research(
+        checkpoint,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=5),
+    )
+
+    assert [c.strategy_id for c in resumed.final_population] == [
+        c.strategy_id for c in uninterrupted.final_population
+    ]
+    assert resumed.history == uninterrupted.history
+    assert resumed.provenance == uninterrupted.provenance
+    assert resumed.final_checkpoint == uninterrupted.final_checkpoint
+    assert len(resumed.generations) == 2
+    assert resumed.generations[0].generation == 3
+    assert resumed.generations[1].generation == 4
+
+
+def test_research_runner_resume_rejects_stopped_checkpoint():
+    stopped = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=10, stop_on_stagnation=2),
+        seed=3,
+    )
+    checkpoint = stopped.final_checkpoint
+    assert checkpoint is not None and checkpoint.stopped
+
+    with pytest.raises(ValueError, match="stopped checkpoint"):
+        resume_research(
+            checkpoint,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=10),
+        )
+
+
+def test_research_runner_resume_validates_generation_budget():
+    first = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=3),
+        seed=17,
+    )
+    checkpoint = first.final_checkpoint
+    assert checkpoint is not None
+
+    with pytest.raises(ValueError, match="exceeds max_generations"):
+        resume_research(
+            checkpoint,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=2),
+        )
 
 
 def test_research_run_policy_validates_bounds():
