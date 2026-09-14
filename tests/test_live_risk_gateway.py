@@ -85,7 +85,7 @@ def test_gateway_rejects_strategy_mismatch() -> None:
         certificate(), strategy_id="strategy-2", now=150.0, requested_capital_fraction=0.01
     )
     assert allowed is False
-    assert "identity mismatch" in reasons
+    assert any("identity mismatch" in reason for reason in reasons)
 
 
 def test_gateway_rejects_tampered_certificate() -> None:
@@ -97,7 +97,7 @@ def test_gateway_rejects_tampered_certificate() -> None:
         requested_capital_fraction=0.01,
     )
     assert allowed is False
-    assert "fingerprint mismatch" in reasons
+    assert any("fingerprint mismatch" in reason for reason in reasons)
 
 
 def test_gateway_rejects_excess_allocation() -> None:
@@ -105,7 +105,7 @@ def test_gateway_rejects_excess_allocation() -> None:
         certificate(), strategy_id="strategy-1", now=150.0, requested_capital_fraction=0.06
     )
     assert allowed is False
-    assert "exceeds certificate allocation" in reasons
+    assert any("exceeds certificate allocation" in reason for reason in reasons)
 
 
 def test_gateway_rejects_invalid_current_policy() -> None:
