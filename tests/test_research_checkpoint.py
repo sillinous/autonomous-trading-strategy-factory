@@ -53,6 +53,8 @@ def test_checkpoint_round_trip_preserves_restart_state():
     assert [c.strategy_id for c in restored.population] == [c.strategy_id for c in result.final_population]
     assert restored.next_generation == 3
     assert restored.next_seed == 20
+    assert restored.history.known_strategy_ids == checkpoint.history.known_strategy_ids
+    assert restored.to_dict()["known_strategy_ids"] == sorted(checkpoint.history.known_strategy_ids)
 
 
 def test_checkpoint_detects_tampering():
@@ -81,4 +83,19 @@ def test_checkpoint_rejects_strategy_id_mismatch():
     payload.pop("state_digest")
     payload["population"][0]["strategy_id"] = "tampered"
     with pytest.raises(ValueError, match="strategy ID"):
+        ResearchCheckpoint.from_dict(payload)
+
+
+def test_checkpoint_rejects_previous_schema_version():
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=4,
+    )
+    payload = result.checkpoints[-1].to_dict()
+    payload["schema_version"] = 1
+    payload.pop("state_digest")
+    with pytest.raises(ValueError, match="unsupported checkpoint schema version"):
         ResearchCheckpoint.from_dict(payload)
