@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .adaptive_evolution import AdaptiveEvolutionPolicy
+from .orchestrator import CandidateEvaluation
 from .population import Candidate
 from .research_checkpoint import ResearchCheckpoint
 from .research_cycle import ResearchCyclePolicy, ResearchCycleResult, run_research_cycle
@@ -39,30 +40,36 @@ class ResearchRunResult:
     final_population: tuple[Candidate, ...]
     stopped_on_stagnation: bool
 
+    @property
+    def final_checkpoint(self) -> ResearchCheckpoint | None:
+        """Return the most recent restart point, when at least one generation ran."""
+        return self.checkpoints[-1] if self.checkpoints else None
 
-CandidateEvaluator = Callable[[Candidate], object]
+
+CandidateEvaluator = Callable[[Candidate], CandidateEvaluation]
 
 
-def run_research(
+def _run_from_state(
     population: list[Candidate],
     evaluator: CandidateEvaluator,
     *,
+    generation: int,
+    seed: int,
+    history: ResearchHistory,
+    prior_provenance: tuple[GenerationProvenance, ...],
+    prior_checkpoints: tuple[ResearchCheckpoint, ...],
     cycle_policy: ResearchCyclePolicy,
-    run_policy: ResearchRunPolicy | None = None,
-    adaptive_policy: AdaptiveEvolutionPolicy | None = None,
-    seed: int = 0,
+    run_policy: ResearchRunPolicy,
+    adaptive_policy: AdaptiveEvolutionPolicy | None,
 ) -> ResearchRunResult:
-    """Run bounded deterministic research generations without execution authority."""
-    run_policy = run_policy or ResearchRunPolicy()
-    history = ResearchHistory()
     results: list[ResearchCycleResult] = []
-    provenance: list[GenerationProvenance] = []
-    checkpoints: list[ResearchCheckpoint] = []
+    provenance = list(prior_provenance)
+    checkpoints = list(prior_checkpoints)
     current = list(population)
     stopped = False
 
-    for generation in range(run_policy.max_generations):
-        generation_seed = seed + generation
+    while generation < run_policy.max_generations:
+        generation_seed = seed
         result = run_research_cycle(
             current,
             evaluator,
@@ -91,7 +98,7 @@ def run_research(
         checkpoints.append(
             ResearchCheckpoint(
                 next_generation=generation + 1,
-                next_seed=seed + generation + 1,
+                next_seed=generation_seed + 1,
                 population=tuple(current),
                 history=history,
                 provenance=tuple(provenance),
@@ -100,6 +107,8 @@ def run_research(
         )
         if stopped:
             break
+        generation += 1
+        seed += 1
 
     return ResearchRunResult(
         history=history,
@@ -108,4 +117,61 @@ def run_research(
         checkpoints=tuple(checkpoints),
         final_population=tuple(current),
         stopped_on_stagnation=stopped,
+    )
+
+
+def run_research(
+    population: list[Candidate],
+    evaluator: CandidateEvaluator,
+    *,
+    cycle_policy: ResearchCyclePolicy,
+    run_policy: ResearchRunPolicy | None = None,
+    adaptive_policy: AdaptiveEvolutionPolicy | None = None,
+    seed: int = 0,
+) -> ResearchRunResult:
+    """Run bounded deterministic research generations without execution authority."""
+    run_policy = run_policy or ResearchRunPolicy()
+    return _run_from_state(
+        population,
+        evaluator,
+        generation=0,
+        seed=seed,
+        history=ResearchHistory(),
+        prior_provenance=(),
+        prior_checkpoints=(),
+        cycle_policy=cycle_policy,
+        run_policy=run_policy,
+        adaptive_policy=adaptive_policy,
+    )
+
+
+def resume_research(
+    checkpoint: ResearchCheckpoint,
+    evaluator: CandidateEvaluator,
+    *,
+    cycle_policy: ResearchCyclePolicy,
+    run_policy: ResearchRunPolicy | None = None,
+    adaptive_policy: AdaptiveEvolutionPolicy | None = None,
+) -> ResearchRunResult:
+    """Resume a deterministic research run from a validated checkpoint.
+
+    ``max_generations`` is the absolute generation target, so a checkpoint at
+    ``next_generation=3`` with ``max_generations=5`` executes generations 3 and 4.
+    """
+    run_policy = run_policy or ResearchRunPolicy()
+    if checkpoint.stopped:
+        raise ValueError("cannot resume a stopped checkpoint")
+    if checkpoint.next_generation > run_policy.max_generations:
+        raise ValueError("checkpoint next_generation exceeds max_generations")
+    return _run_from_state(
+        list(checkpoint.population),
+        evaluator,
+        generation=checkpoint.next_generation,
+        seed=checkpoint.next_seed,
+        history=checkpoint.history,
+        prior_provenance=checkpoint.provenance,
+        prior_checkpoints=(checkpoint,),
+        cycle_policy=cycle_policy,
+        run_policy=run_policy,
+        adaptive_policy=adaptive_policy,
     )
