@@ -36,6 +36,7 @@ class ResearchHistory:
     """Deterministic, persistence-agnostic history of research generations."""
 
     records: tuple[GenerationRecord, ...] = ()
+    known_strategy_ids: frozenset[str] = frozenset()
 
     @property
     def latest(self) -> GenerationRecord | None:
@@ -87,8 +88,9 @@ class ResearchHistory:
             result.evaluations,
             key=lambda evaluation: (evaluation.fitness.score, evaluation.candidate_id),
         )
-        parent_ids = {candidate.strategy_id for candidate in result.selected_parents}
-        new_strategy_count = sum(1 for candidate_id in ids if candidate_id not in parent_ids)
+        known = self.known_strategy_ids
+        new_strategy_count = sum(1 for candidate_id in ids if candidate_id not in known)
+        current_ids = frozenset(ids)
 
         previous_best = self.best_fitness
         if previous_best is None or result.metrics.best_fitness > previous_best + improvement_epsilon:
@@ -106,12 +108,15 @@ class ResearchHistory:
             mean_genome_distance=mean_distance,
             min_genome_distance=minimum_distance,
             max_genome_distance=maximum_distance,
-            unique_strategy_count=len(set(ids)),
+            unique_strategy_count=len(current_ids),
             new_strategy_count=new_strategy_count,
             best_strategy_id=best.candidate_id,
             generations_without_improvement=stagnation,
         )
-        return ResearchHistory(records=self.records + (record,))
+        return ResearchHistory(
+            records=self.records + (record,),
+            known_strategy_ids=known | current_ids,
+        )
 
     def is_stagnating(self, threshold: int) -> bool:
         if threshold < 1:
