@@ -2,14 +2,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from atsf.research_history import ResearchHistory
 from atsf.research_cycle import ResearchCycleResult
+from atsf.research_history import ResearchHistory
 
 
 def candidate(candidate_id: str, feature: int):
     return SimpleNamespace(
         strategy_id=candidate_id,
-        strategy=SimpleNamespace(model_dump=lambda mode=None, feature=feature: {"feature": feature}),
+        strategy=SimpleNamespace(
+            model_dump=lambda mode=None, feature=feature: {"feature": feature}
+        ),
     )
 
 
@@ -43,12 +45,26 @@ def test_history_records_diversity_and_new_strategies():
     assert record is not None
     assert record.generation == 0
     assert record.unique_strategy_count == 3
-    assert record.new_strategy_count == 2
+    assert record.new_strategy_count == 3
     assert record.mean_genome_distance == 1.0
     assert record.min_genome_distance == 1.0
     assert record.max_genome_distance == 1.0
     assert record.generations_without_improvement == 0
     assert history.best_fitness == 1.0
+    assert history.known_strategy_ids == frozenset({"a", "b", "c"})
+
+
+def test_history_counts_only_never_seen_strategies_as_new():
+    first_population = [candidate("a", 1), candidate("b", 2)]
+    history = ResearchHistory().record_generation(
+        result(0, {"a": 1.0, "b": 0.5}, first_population), first_population
+    )
+    second_population = [candidate("a", 1), candidate("c", 3)]
+    history = history.record_generation(
+        result(1, {"a": 1.0, "c": 0.7}, [second_population[0]]), second_population
+    )
+    assert history.records[-1].new_strategy_count == 1
+    assert history.known_strategy_ids == frozenset({"a", "b", "c"})
 
 
 def test_history_detects_stagnation_and_resets_on_improvement():
