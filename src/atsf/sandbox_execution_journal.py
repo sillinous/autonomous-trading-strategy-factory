@@ -71,7 +71,7 @@ class SandboxExecutionJournal:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         return sha256(encoded.encode("utf-8")).hexdigest()
 
-    def append(
+    def append_in_transaction(
         self,
         intent_id: str,
         state: ExecutionState,
@@ -79,6 +79,7 @@ class SandboxExecutionJournal:
         timestamp: float,
         detail: str = "",
     ) -> ExecutionEvent:
+        """Append without committing, for a caller coordinating intent persistence."""
         if not intent_id.strip():
             raise ValueError("intent_id is required")
         if not isfinite(timestamp):
@@ -103,14 +104,26 @@ class SandboxExecutionJournal:
             event_fingerprint=self._fingerprint(intent_id, sequence, state, timestamp, detail),
             detail=detail,
         )
-        with self._connection:
-            self._connection.execute(
-                """INSERT INTO sandbox_execution_events(
-                    intent_id, sequence, state, timestamp, event_fingerprint, detail
-                ) VALUES (?, ?, ?, ?, ?, ?)""",
-                (intent_id, sequence, state.value, timestamp, event.event_fingerprint, detail),
-            )
+        self._connection.execute(
+            """INSERT INTO sandbox_execution_events(
+                intent_id, sequence, state, timestamp, event_fingerprint, detail
+            ) VALUES (?, ?, ?, ?, ?, ?)""",
+            (intent_id, sequence, state.value, timestamp, event.event_fingerprint, detail),
+        )
         return event
+
+    def append(
+        self,
+        intent_id: str,
+        state: ExecutionState,
+        *,
+        timestamp: float,
+        detail: str = "",
+    ) -> ExecutionEvent:
+        with self._connection:
+            return self.append_in_transaction(
+                intent_id, state, timestamp=timestamp, detail=detail
+            )
 
     def events(self, intent_id: str) -> tuple[ExecutionEvent, ...]:
         rows = self._connection.execute(
