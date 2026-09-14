@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from atsf.research_health import ResearchHealthDecision, ResearchHealthStatus
+from atsf.research_health import (
+    ResearchHealthDecision,
+    ResearchHealthPolicy,
+    ResearchHealthStatus,
+)
 from atsf.research_history import GenerationRecord, ResearchHistory
 from atsf.research_scheduler import (
     ResearchScheduleAction,
@@ -71,7 +75,11 @@ def test_scheduler_continues_until_minimum_research_depth():
 def test_scheduler_requires_promotion_candidate_for_review():
     history, result = make_state(promotion=0)
 
-    schedule = schedule_research(history, result)
+    schedule = schedule_research(
+        history,
+        result,
+        health_policy=ResearchHealthPolicy(min_promotion_eligible_ratio=0.0),
+    )
 
     assert schedule.action is ResearchScheduleAction.CONTINUE_RESEARCH
     assert any("no promotion-eligible" in reason for reason in schedule.reasons)
