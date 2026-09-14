@@ -63,6 +63,7 @@ class ResearchCheckpoint:
             "next_seed": self.next_seed,
             "population": [_candidate_to_dict(candidate) for candidate in self.population],
             "history": [asdict(record) for record in self.history.records],
+            "known_strategy_ids": sorted(self.history.known_strategy_ids),
             "provenance": [_provenance_to_dict(item) for item in self.provenance],
             "stopped": self.stopped,
         }
@@ -90,7 +91,8 @@ class ResearchCheckpoint:
         try:
             population = tuple(_candidate_from_dict(item) for item in state["population"])
             history = ResearchHistory(
-                records=tuple(GenerationRecord(**item) for item in state["history"])
+                records=tuple(GenerationRecord(**item) for item in state["history"]),
+                known_strategy_ids=frozenset(state.get("known_strategy_ids", ())),
             )
             provenance = tuple(_provenance_from_dict(item) for item in state["provenance"])
             return cls(
