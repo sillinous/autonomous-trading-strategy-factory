@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from random import Random
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
+from .adaptive_evolution import AdaptiveEvolutionPolicy, adapt_evolution
 from .orchestrator import CandidateEvaluation
 from .population import Candidate, evolve_population
 from .selection import SelectionPolicy, select_population
+
+if TYPE_CHECKING:
+    from .research_history import ResearchHistory
 
 
 CandidateEvaluator = Callable[[Candidate], CandidateEvaluation]
@@ -43,6 +47,9 @@ class GenerationMetrics:
     promoted_count: int
     best_fitness: float
     mean_fitness: float
+    crossover_rate: float
+    mutation_rate: float
+    stagnating: bool
 
 
 @dataclass(frozen=True)
@@ -63,8 +70,10 @@ def run_research_cycle(
     generation: int,
     seed: int,
     policy: ResearchCyclePolicy,
+    history: ResearchHistory | None = None,
+    adaptive_policy: AdaptiveEvolutionPolicy | None = None,
 ) -> ResearchCycleResult:
-    """Evaluate, select, and evolve one strategy population deterministically.
+    """Evaluate, select, and evolve one research generation deterministically.
 
     The evaluator is injected so this controller stays independent of market-data
     storage, backtest infrastructure, and execution. It never submits orders or
@@ -84,20 +93,26 @@ def run_research_cycle(
         raise ValueError("evaluator must return one evaluation per candidate")
 
     selected = tuple(select_population(population, list(evaluations), policy.selection))
+    rates = adapt_evolution(
+        policy.crossover_rate,
+        policy.mutation_rate,
+        history,
+        adaptive_policy,
+    )
     rng = Random(seed)
     next_population = tuple(
         evolve_population(
             list(selected),
             policy.selection.population_size,
             rng,
-            crossover_rate=policy.crossover_rate,
-            mutation_rate=policy.mutation_rate,
+            crossover_rate=rates.crossover_rate,
+            mutation_rate=rates.mutation_rate,
             elite_count=policy.elite_count,
         )
     )
 
     eligible = [evaluation for evaluation in evaluations if evaluation.promotion.eligible]
-    promoted = sum(1 for evaluation in evaluations if evaluation.promotion.eligible)
+    promoted = len(eligible)
     fitness_values = [evaluation.fitness.score for evaluation in evaluations]
     metrics = GenerationMetrics(
         generation=generation,
@@ -107,6 +122,9 @@ def run_research_cycle(
         promoted_count=promoted,
         best_fitness=max(fitness_values),
         mean_fitness=sum(fitness_values) / len(fitness_values),
+        crossover_rate=rates.crossover_rate,
+        mutation_rate=rates.mutation_rate,
+        stagnating=rates.stagnating,
     )
     return ResearchCycleResult(
         generation=generation,
