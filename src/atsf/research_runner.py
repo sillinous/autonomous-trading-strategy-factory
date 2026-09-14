@@ -7,6 +7,7 @@ from .adaptive_evolution import AdaptiveEvolutionPolicy
 from .population import Candidate
 from .research_cycle import ResearchCyclePolicy, ResearchCycleResult, run_research_cycle
 from .research_history import ResearchHistory
+from .research_provenance import GenerationProvenance, build_generation_provenance
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class ResearchRunResult:
 
     history: ResearchHistory
     generations: tuple[ResearchCycleResult, ...]
+    provenance: tuple[GenerationProvenance, ...]
     final_population: tuple[Candidate, ...]
     stopped_on_stagnation: bool
 
@@ -52,15 +54,17 @@ def run_research(
     run_policy = run_policy or ResearchRunPolicy()
     history = ResearchHistory()
     results: list[ResearchCycleResult] = []
+    provenance: list[GenerationProvenance] = []
     current = list(population)
     stopped = False
 
     for generation in range(run_policy.max_generations):
+        generation_seed = seed + generation
         result = run_research_cycle(
             current,
             evaluator,
             generation=generation,
-            seed=seed + generation,
+            seed=generation_seed,
             policy=cycle_policy,
             history=history,
             adaptive_policy=adaptive_policy,
@@ -69,6 +73,9 @@ def run_research(
             result,
             current,
             improvement_epsilon=run_policy.improvement_epsilon,
+        )
+        provenance.append(
+            build_generation_provenance(result, current, seed=generation_seed)
         )
         results.append(result)
         current = list(result.next_population)
@@ -83,6 +90,7 @@ def run_research(
     return ResearchRunResult(
         history=history,
         generations=tuple(results),
+        provenance=tuple(provenance),
         final_population=tuple(current),
         stopped_on_stagnation=stopped,
     )
