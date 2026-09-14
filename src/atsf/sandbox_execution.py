@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
+from typing import TYPE_CHECKING
 
 from .live_execution_intent import LiveExecutionIntent, verify_execution_intent
 from .live_execution_intent_store import LiveExecutionIntentStore
 from .live_risk_gateway import LiveRiskCertificate, validate_live_risk_certificate
+
+if TYPE_CHECKING:
+    from .sandbox_execution_journal import SandboxExecutionJournal
 
 
 class ExecutionMode(str, Enum):
@@ -67,8 +71,31 @@ class SandboxExecutionResult:
 class SandboxExecutionAdapter:
     """Deterministic local adapter; it has no broker or network capability."""
 
-    def __init__(self, store: LiveExecutionIntentStore) -> None:
+    def __init__(
+        self,
+        store: LiveExecutionIntentStore,
+        journal: SandboxExecutionJournal | None = None,
+    ) -> None:
         self._store = store
+        self._journal = journal
+
+    def _reject(self, intent_id: str, reason: str, *, now: float) -> SandboxExecutionResult:
+        if self._journal is not None and self._journal.latest(intent_id) is not None:
+            latest = self._journal.latest(intent_id)
+            if latest is not None and latest.state not in {
+                ExecutionState.FILLED,
+                ExecutionState.REJECTED,
+                ExecutionState.CANCELLED,
+                ExecutionState.EXPIRED,
+            }:
+                self._journal.append(intent_id, ExecutionState.REJECTED, timestamp=now, detail=reason)
+        return SandboxExecutionResult(
+            mode=ExecutionMode.SANDBOX,
+            state=ExecutionState.REJECTED,
+            intent_id=intent_id,
+            fill=None,
+            reasons=(reason,),
+        )
 
     def execute(
         self,
@@ -90,16 +117,12 @@ class SandboxExecutionAdapter:
             )
         if not isfinite(now):
             raise ValueError("now must be finite")
+        if self._journal is not None and self._journal.latest(intent.intent_id) is None:
+            self._journal.append(intent.intent_id, ExecutionState.CREATED, timestamp=now)
         if market.symbol != intent.symbol:
-            return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=("market symbol does not match intent",)
-            )
+            return self._reject(intent.intent_id, "market symbol does not match intent", now=now)
         if not verify_execution_intent(intent):
-            return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=("execution intent fingerprint is invalid",)
-            )
+            return self._reject(intent.intent_id, "execution intent fingerprint is invalid", now=now)
         allowed, reasons = validate_live_risk_certificate(
             certificate,
             strategy_id=intent.strategy_id,
@@ -108,29 +131,30 @@ class SandboxExecutionAdapter:
             kill_switch_engaged=kill_switch_engaged,
         )
         if not allowed:
-            return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=tuple(reasons)
-            )
+            return self._reject(intent.intent_id, reasons[0], now=now)
         record = self._store.get(intent.intent_id)
         if record is None:
-            return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=("execution intent has not been journaled",)
-            )
+            return self._reject(intent.intent_id, "execution intent has not been journaled", now=now)
         if record.status != "CREATED":
             return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=(f"already {record.status.lower()}",)
+                mode=mode,
+                state=ExecutionState.REJECTED,
+                intent_id=intent.intent_id,
+                fill=None,
+                reasons=(f"already {record.status.lower()}",),
             )
+        if self._journal is not None:
+            latest = self._journal.latest(intent.intent_id)
+            if latest is not None and latest.state is ExecutionState.CREATED:
+                self._journal.append(intent.intent_id, ExecutionState.VALIDATED, timestamp=now)
+                self._journal.append(intent.intent_id, ExecutionState.ADMITTED, timestamp=now)
         consumed = self._store.consume(
             intent, certificate, now=now, kill_switch_engaged=kill_switch_engaged
         )
         if consumed.status != "CONSUMED":
-            return SandboxExecutionResult(
-                mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=("execution intent consumption failed",)
-            )
+            return self._reject(intent.intent_id, "execution intent consumption failed", now=now)
+        if self._journal is not None:
+            self._journal.append(intent.intent_id, ExecutionState.CONSUMED, timestamp=now)
         price = market.ask if intent.side == "BUY" else market.bid
         fill = SandboxFill(
             intent_id=intent.intent_id,
@@ -142,6 +166,13 @@ class SandboxExecutionAdapter:
             market_timestamp=market.timestamp,
             filled_at=now,
         )
+        if self._journal is not None:
+            self._journal.append(
+                intent.intent_id,
+                ExecutionState.FILLED,
+                timestamp=now,
+                detail=f"price={price}",
+            )
         return SandboxExecutionResult(
             mode=mode,
             state=ExecutionState.FILLED,
