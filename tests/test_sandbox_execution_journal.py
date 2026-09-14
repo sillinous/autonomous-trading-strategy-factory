@@ -70,26 +70,35 @@ def test_first_event_must_create_execution_state():
 
 
 @pytest.mark.parametrize(
-    ("current", "next_state"),
+    ("prefix", "current", "next_state"),
     [
-        (ExecutionState.CREATED, ExecutionState.CONSUMED),
-        (ExecutionState.VALIDATED, ExecutionState.CREATED),
-        (ExecutionState.ADMITTED, ExecutionState.FILLED),
-        (ExecutionState.CONSUMED, ExecutionState.CREATED),
-        (ExecutionState.FILLED, ExecutionState.CREATED),
-        (ExecutionState.REJECTED, ExecutionState.FILLED),
-        (ExecutionState.CANCELLED, ExecutionState.VALIDATED),
-        (ExecutionState.EXPIRED, ExecutionState.ADMITTED),
+        ((), ExecutionState.CREATED, ExecutionState.CONSUMED),
+        ((ExecutionState.CREATED,), ExecutionState.VALIDATED, ExecutionState.CREATED),
+        ((ExecutionState.CREATED, ExecutionState.VALIDATED), ExecutionState.ADMITTED, ExecutionState.FILLED),
+        (
+            (ExecutionState.CREATED, ExecutionState.VALIDATED, ExecutionState.ADMITTED),
+            ExecutionState.CONSUMED,
+            ExecutionState.CREATED,
+        ),
+        (
+            (ExecutionState.CREATED, ExecutionState.VALIDATED, ExecutionState.ADMITTED, ExecutionState.CONSUMED),
+            ExecutionState.FILLED,
+            ExecutionState.CREATED,
+        ),
+        ((ExecutionState.CREATED,), ExecutionState.REJECTED, ExecutionState.FILLED),
+        ((ExecutionState.CREATED,), ExecutionState.CANCELLED, ExecutionState.VALIDATED),
+        ((ExecutionState.CREATED,), ExecutionState.EXPIRED, ExecutionState.ADMITTED),
     ],
 )
-def test_impossible_execution_transition_is_rejected(current, next_state):
+def test_impossible_execution_transition_is_rejected(prefix, current, next_state):
     registry = ExperimentRegistry(":memory:")
     journal = SandboxExecutionJournal(registry)
-    journal.append("intent-1", ExecutionState.CREATED, timestamp=100.0)
-    if current is not ExecutionState.CREATED:
-        journal.append("intent-1", current, timestamp=101.0)
+    intent_id = f"{current.value.lower()}-intent"
+    for index, state in enumerate(prefix, start=100):
+        journal.append(intent_id, state, timestamp=float(index))
+    journal.append(intent_id, current, timestamp=float(100 + len(prefix)))
     with pytest.raises(ValueError, match="invalid execution transition"):
-        journal.append("intent-1", next_state, timestamp=102.0)
+        journal.append(intent_id, next_state, timestamp=200.0)
     registry.close()
 
 
