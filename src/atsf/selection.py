@@ -59,12 +59,11 @@ def _eligible(evaluation: CandidateEvaluation, policy: SelectionPolicy) -> bool:
 
 
 def _rank_key(evaluation: CandidateEvaluation) -> tuple:
-    """Stable scalar ordering; Pareto filtering is performed before this key."""
-    robustness = _robustness_ratio(evaluation)
+    """Stable scalar ordering used after eligibility and diversity decisions."""
     return (
         float(evaluation.fitness.score),
         float(evaluation.monte_carlo.pass_rate),
-        robustness,
+        _robustness_ratio(evaluation),
         float(evaluation.regime.score),
         evaluation.candidate_id,
     )
@@ -107,29 +106,34 @@ def pareto_front(evaluations: list[CandidateEvaluation]) -> list[CandidateEvalua
 
 
 def _select_diverse(
-    front: list[CandidateEvaluation],
+    evaluations: list[CandidateEvaluation],
     by_id: dict[str, Candidate],
     population_size: int,
     minimum_distance: float,
 ) -> list[str]:
-    """Select a quality-ranked max-min diverse subset of the Pareto front."""
-    if not front or population_size <= 0:
+    """Select a quality-aware max-min diverse subset of the eligible pool.
+
+    Diversity is evaluated across every eligible candidate, not just the Pareto
+    front. This prevents a high-quality but dominated strategy family from being
+    erased solely because it is dominated on current performance objectives.
+    """
+    ordered = sorted(evaluations, key=_rank_key, reverse=True)
+    if not ordered or population_size <= 0:
         return []
 
-    selected: list[str] = [front[0].candidate_id]
+    selected: list[str] = [ordered[0].candidate_id]
     while len(selected) < population_size:
-        options = [item for item in front if item.candidate_id not in selected]
+        options = [item for item in ordered if item.candidate_id not in selected]
         if not options:
             break
 
         scored: list[tuple[float, tuple, str]] = []
         for evaluation in options:
             candidate = by_id[evaluation.candidate_id]
-            distances = [
+            minimum = min(
                 genome_distance(candidate.strategy, by_id[selected_id].strategy)
                 for selected_id in selected
-            ]
-            minimum = min(distances)
+            )
             scored.append((minimum, _rank_key(evaluation), evaluation.candidate_id))
 
         admissible = [item for item in scored if item[0] >= minimum_distance]
@@ -148,9 +152,9 @@ def select_population(
 ) -> list[Candidate]:
     """Select a deterministic, promotion-aware population from evaluated candidates.
 
-    Selection is deliberately separate from variation. The evaluator remains the
-    source of truth for fitness and robustness evidence; this function only chooses
-    which already-evaluated candidates survive to become parents.
+    Selection is deliberately separate from variation. Pareto analysis remains
+    available as an objective-quality diagnostic, while survivor selection can
+    preserve structurally diverse strategies across the complete eligible pool.
     """
     if not candidates:
         raise ValueError("candidates must not be empty")
@@ -166,7 +170,6 @@ def select_population(
     if not eligible:
         raise ValueError("no candidates satisfy selection gates")
 
-    front = pareto_front(eligible)
     selected_ids: list[str] = []
     selected_set: set[str] = set()
 
@@ -178,7 +181,7 @@ def select_population(
     if policy.preserve_diversity:
         selected_ids.extend(
             _select_diverse(
-                front,
+                eligible,
                 by_id,
                 policy.population_size,
                 policy.min_genome_distance,
@@ -186,7 +189,7 @@ def select_population(
         )
         selected_set.update(selected_ids)
     else:
-        for evaluation in front:
+        for evaluation in pareto_front(eligible):
             add(evaluation)
 
     # Diversity is a preference, not a reason to fail a valid research cycle when
