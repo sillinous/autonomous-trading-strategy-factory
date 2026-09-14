@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from hashlib import sha256
 import json
-from typing import Any
+from math import isfinite
+from typing import Any, Mapping
 
 from .population import Candidate
 from .research_cycle import ResearchCycleResult
@@ -32,22 +33,71 @@ class GenerationProvenance:
     metrics_digest: str
 
 
+def _canonicalize(value: Any) -> Any:
+    """Convert supported research objects into deterministic JSON-compatible data."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise ValueError("provenance values must be finite")
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonicalize(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if is_dataclass(value):
+        return _canonicalize(asdict(value))
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _canonicalize(model_dump(mode="json"))
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return _canonicalize(value.to_dict())
+    if isinstance(value, (tuple, list)):
+        return [_canonicalize(item) for item in value]
+    if hasattr(value, "item") and callable(value.item):
+        return _canonicalize(value.item())
+    return str(value)
+
+
 def _canonical_digest(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    payload = json.dumps(
+        _canonicalize(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _candidate_record(candidate: Candidate, generation: int, evaluation: Any, seed: int) -> CandidateProvenance:
-    parents = tuple(candidate.lineage.parent_ids)
+def _candidate_record(
+    candidate: Candidate,
+    generation: int,
+    evaluation: Any,
+    seed: int,
+) -> CandidateProvenance:
+    if evaluation.candidate_id != candidate.strategy_id:
+        raise ValueError("evaluation candidate_id does not match candidate strategy_id")
+
+    evidence_fields = (
+        "experiment",
+        "backtest",
+        "validation_passed",
+        "fitness",
+        "walk_forward",
+        "monte_carlo",
+        "perturbation",
+        "regime",
+        "robustness",
+        "promotion",
+    )
     evaluation_payload = {
-        "candidate_id": getattr(evaluation, "candidate_id", candidate.strategy_id),
-        "fitness": getattr(getattr(evaluation, "fitness", None), "score", None),
-        "promotion": getattr(getattr(evaluation, "promotion", None), "eligible", None),
+        field: getattr(evaluation, field, None) for field in evidence_fields
     }
     return CandidateProvenance(
         strategy_id=candidate.strategy_id,
         generation=generation,
-        parent_strategy_ids=parents,
+        parent_strategy_ids=tuple(candidate.lineage.parent_ids),
         genome_digest=_canonical_digest(candidate.strategy),
         evaluation_digest=_canonical_digest(evaluation_payload),
         research_seed=seed,
@@ -86,7 +136,11 @@ def build_generation_provenance(
     return GenerationProvenance(
         generation=result.generation,
         candidate_records=records,
-        selected_strategy_ids=tuple(candidate.strategy_id for candidate in result.selected_parents),
-        next_strategy_ids=tuple(candidate.strategy_id for candidate in result.next_population),
+        selected_strategy_ids=tuple(
+            candidate.strategy_id for candidate in result.selected_parents
+        ),
+        next_strategy_ids=tuple(
+            candidate.strategy_id for candidate in result.next_population
+        ),
         metrics_digest=_canonical_digest(metrics),
     )
