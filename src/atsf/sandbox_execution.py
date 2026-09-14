@@ -121,7 +121,7 @@ class SandboxExecutionAdapter:
         if record.status != "CREATED":
             return SandboxExecutionResult(
                 mode=mode, state=ExecutionState.REJECTED, intent_id=intent.intent_id,
-                fill=None, reasons=(f"execution intent is already {record.status.lower()}",)
+                fill=None, reasons=(f"already {record.status.lower()}",)
             )
         consumed = self._store.consume(
             intent, certificate, now=now, kill_switch_engaged=kill_switch_engaged
