@@ -103,7 +103,7 @@ class ResearchCheckpoint:
                 schema_version=int(state["schema_version"]),
                 state_digest=supplied_digest,
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError) as exc:
             raise ValueError("invalid research checkpoint payload") from exc
 
     @classmethod
