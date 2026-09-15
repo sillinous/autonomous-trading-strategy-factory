@@ -36,6 +36,48 @@ def test_event_journal_is_append_only_and_recoverable(tmp_path: Path):
     restarted.close()
 
 
+def test_event_fingerprints_form_a_chain():
+    registry = ExperimentRegistry(":memory:")
+    journal = SandboxExecutionJournal(registry)
+    first = journal.append("intent-1", ExecutionState.CREATED, timestamp=100.0)
+    second = journal.append("intent-1", ExecutionState.VALIDATED, timestamp=101.0)
+    assert first.previous_fingerprint == ""
+    assert second.previous_fingerprint == first.event_fingerprint
+    assert second.event_fingerprint != first.event_fingerprint
+    assert journal.verify("intent-1")
+    registry.close()
+
+
+def test_tampering_with_prior_event_breaks_chain():
+    registry = ExperimentRegistry(":memory:")
+    journal = SandboxExecutionJournal(registry)
+    journal.append("intent-1", ExecutionState.CREATED, timestamp=100.0)
+    journal.append("intent-1", ExecutionState.VALIDATED, timestamp=101.0)
+    journal.append("intent-1", ExecutionState.ADMITTED, timestamp=102.0)
+    registry._connection.execute(
+        "UPDATE sandbox_execution_events SET detail = 'tampered' WHERE intent_id = ? AND sequence = 1",
+        ("intent-1",),
+    )
+    registry._connection.commit()
+    assert not journal.verify("intent-1")
+    registry.close()
+
+
+def test_tampering_with_chain_pointer_is_detected():
+    registry = ExperimentRegistry(":memory:")
+    journal = SandboxExecutionJournal(registry)
+    first = journal.append("intent-1", ExecutionState.CREATED, timestamp=100.0)
+    journal.append("intent-1", ExecutionState.VALIDATED, timestamp=101.0)
+    registry._connection.execute(
+        "UPDATE sandbox_execution_events SET previous_fingerprint = ? WHERE intent_id = ? AND sequence = 2",
+        ("wrong", "intent-1"),
+    )
+    registry._connection.commit()
+    assert not journal.verify("intent-1")
+    assert journal.events("intent-1")[1].previous_fingerprint != first.event_fingerprint
+    registry.close()
+
+
 def test_event_fingerprints_are_deterministic():
     registry = ExperimentRegistry(":memory:")
     journal = SandboxExecutionJournal(registry)
