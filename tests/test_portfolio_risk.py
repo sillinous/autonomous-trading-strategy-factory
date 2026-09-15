@@ -52,3 +52,4 @@ def test_risk_rejects_all_when_even_single_strategy_is_too_volatile():
     assert result.admitted_strategy_ids == ()
     assert set(result.risk_rejected_strategy_ids) == {"a", "b", "c"}
     assert result.allocation.weights == {}
+    assert result.portfolio_volatility > 0.01
