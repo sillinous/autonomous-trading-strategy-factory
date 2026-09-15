@@ -37,10 +37,19 @@ class PortfolioHealthResult:
     max_risk_fraction: float
     breached_limits: tuple[str, ...]
     replace_strategy_ids: tuple[str, ...]
+    execution_authority: bool = False
 
     @property
     def healthy(self) -> bool:
         return self.status == "HEALTHY"
+
+    @property
+    def decision(self) -> str:
+        if self.status == "HEALTHY":
+            return "CONTINUE_PORTFOLIO"
+        if "concentration" in self.breached_limits:
+            return "REBALANCE_OR_RESEARCH_REPLACEMENT"
+        return "RESEARCH_REPLACEMENT"
 
 
 def assess_portfolio_health(
@@ -59,10 +68,14 @@ def assess_portfolio_health(
     total_risk = sum(abs(item.risk_contribution) for item in attribution.contributions)
     if not isfinite(total_risk):
         raise ValueError("portfolio risk attribution is non-finite")
-    risk_fractions = {
-        item.strategy_id: abs(item.risk_contribution) / total_risk
-        for item in attribution.contributions
-    } if total_risk else {item.strategy_id: 0.0 for item in attribution.contributions}
+    risk_fractions = (
+        {
+            item.strategy_id: abs(item.risk_contribution) / total_risk
+            for item in attribution.contributions
+        }
+        if total_risk
+        else {item.strategy_id: 0.0 for item in attribution.contributions}
+    )
     max_risk_fraction = max(risk_fractions.values(), default=0.0)
 
     breached: list[str] = []
@@ -74,8 +87,11 @@ def assess_portfolio_health(
         breached.append("concentration")
 
     replacements = tuple(
-        sorted(strategy_id for strategy_id, fraction in risk_fractions.items()
-               if fraction > policy.max_single_strategy_risk_fraction)
+        sorted(
+            strategy_id
+            for strategy_id, fraction in risk_fractions.items()
+            if fraction > policy.max_single_strategy_risk_fraction
+        )
     )
     return PortfolioHealthResult(
         status="HEALTHY" if not breached else "REVIEW_REQUIRED",
@@ -84,4 +100,5 @@ def assess_portfolio_health(
         max_risk_fraction=max_risk_fraction,
         breached_limits=tuple(breached),
         replace_strategy_ids=replacements,
+        execution_authority=False,
     )
