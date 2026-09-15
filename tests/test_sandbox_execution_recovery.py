@@ -73,11 +73,22 @@ def test_legacy_journal_schema_fails_closed_without_explicit_migration():
 
 def test_unsupported_schema_version_fails_closed():
     registry = ExperimentRegistry(":memory:")
-    journal = SandboxExecutionJournal(registry)
-    journal.append("intent-1", ExecutionState.CREATED, timestamp=100.0)
     registry._connection.execute(
-        "UPDATE sandbox_execution_events SET schema_version = 999 WHERE intent_id = ?",
-        ("intent-1",),
+        """CREATE TABLE sandbox_execution_events (
+            intent_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            timestamp REAL NOT NULL,
+            event_fingerprint TEXT NOT NULL UNIQUE,
+            detail TEXT NOT NULL DEFAULT '',
+            previous_fingerprint TEXT NOT NULL DEFAULT '',
+            schema_version INTEGER NOT NULL,
+            PRIMARY KEY (intent_id, sequence)
+        )"""
+    )
+    registry._connection.execute(
+        "INSERT INTO sandbox_execution_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("intent-1", 1, ExecutionState.CREATED.value, 100.0, "x" * 64, "", "", 999),
     )
     registry._connection.commit()
     with pytest.raises(ValueError, match="unsupported sandbox execution journal schema version"):
