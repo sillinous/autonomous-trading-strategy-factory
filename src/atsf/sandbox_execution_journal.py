@@ -17,6 +17,7 @@ class ExecutionEvent:
     timestamp: float
     event_fingerprint: str
     detail: str = ""
+    previous_fingerprint: str = ""
 
 
 _ALLOWED_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
@@ -38,32 +39,50 @@ _ALLOWED_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
 
 
 class SandboxExecutionJournal:
-    """Append-only SQLite event journal with fail-closed state-machine enforcement."""
+    """Append-only SQLite event journal with chained, tamper-evident fingerprints."""
 
     def __init__(self, registry: ExperimentRegistry) -> None:
         self._connection = registry._connection
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        self._connection.execute(
-            """CREATE TABLE IF NOT EXISTS sandbox_execution_events (
-                intent_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                state TEXT NOT NULL,
-                timestamp REAL NOT NULL,
-                event_fingerprint TEXT NOT NULL UNIQUE,
-                detail TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY (intent_id, sequence),
-                CHECK (state IN ('CREATED', 'VALIDATED', 'ADMITTED', 'CONSUMED', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED'))
-            )"""
-        )
+        columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(sandbox_execution_events)").fetchall()
+        }
+        if not columns:
+            self._connection.execute(
+                """CREATE TABLE sandbox_execution_events (
+                    intent_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    event_fingerprint TEXT NOT NULL UNIQUE,
+                    detail TEXT NOT NULL DEFAULT '',
+                    previous_fingerprint TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (intent_id, sequence),
+                    CHECK (state IN ('CREATED', 'VALIDATED', 'ADMITTED', 'CONSUMED', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED'))
+                )"""
+            )
+        elif "previous_fingerprint" not in columns:
+            self._connection.execute(
+                "ALTER TABLE sandbox_execution_events ADD COLUMN previous_fingerprint TEXT NOT NULL DEFAULT ''"
+            )
         self._connection.commit()
 
     @staticmethod
-    def _fingerprint(intent_id: str, sequence: int, state: ExecutionState, timestamp: float, detail: str) -> str:
+    def _fingerprint(
+        intent_id: str,
+        sequence: int,
+        state: ExecutionState,
+        timestamp: float,
+        detail: str,
+        previous_fingerprint: str,
+    ) -> str:
         payload = {
             "detail": detail,
             "intent_id": intent_id,
+            "previous_fingerprint": previous_fingerprint,
             "sequence": sequence,
             "state": state.value,
             "timestamp": timestamp,
@@ -79,7 +98,6 @@ class SandboxExecutionJournal:
         timestamp: float,
         detail: str = "",
     ) -> ExecutionEvent:
-        """Append without committing, for a caller coordinating intent persistence."""
         if not intent_id.strip():
             raise ValueError("intent_id is required")
         if not isfinite(timestamp):
@@ -89,41 +107,39 @@ class SandboxExecutionJournal:
             if state is not ExecutionState.CREATED:
                 raise ValueError("first execution event must be CREATED")
             sequence = 1
+            previous_fingerprint = ""
         else:
-            allowed = _ALLOWED_TRANSITIONS[previous.state]
-            if state not in allowed:
+            if state not in _ALLOWED_TRANSITIONS[previous.state]:
                 raise ValueError(
                     f"invalid execution transition: {previous.state.value} -> {state.value}"
                 )
             sequence = previous.sequence + 1
+            previous_fingerprint = previous.event_fingerprint
         event = ExecutionEvent(
             intent_id=intent_id,
             sequence=sequence,
             state=state,
             timestamp=timestamp,
-            event_fingerprint=self._fingerprint(intent_id, sequence, state, timestamp, detail),
+            event_fingerprint=self._fingerprint(
+                intent_id, sequence, state, timestamp, detail, previous_fingerprint
+            ),
             detail=detail,
+            previous_fingerprint=previous_fingerprint,
         )
         self._connection.execute(
             """INSERT INTO sandbox_execution_events(
-                intent_id, sequence, state, timestamp, event_fingerprint, detail
-            ) VALUES (?, ?, ?, ?, ?, ?)""",
-            (intent_id, sequence, state.value, timestamp, event.event_fingerprint, detail),
+                intent_id, sequence, state, timestamp, event_fingerprint, detail, previous_fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                intent_id, sequence, state.value, timestamp, event.event_fingerprint,
+                detail, previous_fingerprint,
+            ),
         )
         return event
 
-    def append(
-        self,
-        intent_id: str,
-        state: ExecutionState,
-        *,
-        timestamp: float,
-        detail: str = "",
-    ) -> ExecutionEvent:
+    def append(self, intent_id: str, state: ExecutionState, *, timestamp: float, detail: str = "") -> ExecutionEvent:
         with self._connection:
-            return self.append_in_transaction(
-                intent_id, state, timestamp=timestamp, detail=detail
-            )
+            return self.append_in_transaction(intent_id, state, timestamp=timestamp, detail=detail)
 
     def events(self, intent_id: str) -> tuple[ExecutionEvent, ...]:
         rows = self._connection.execute(
@@ -138,6 +154,7 @@ class SandboxExecutionJournal:
                 timestamp=row["timestamp"],
                 event_fingerprint=row["event_fingerprint"],
                 detail=row["detail"],
+                previous_fingerprint=row["previous_fingerprint"],
             )
             for row in rows
         )
@@ -150,17 +167,15 @@ class SandboxExecutionJournal:
         if row is None:
             return None
         return ExecutionEvent(
-            intent_id=row["intent_id"],
-            sequence=row["sequence"],
-            state=ExecutionState(row["state"]),
-            timestamp=row["timestamp"],
-            event_fingerprint=row["event_fingerprint"],
-            detail=row["detail"],
+            intent_id=row["intent_id"], sequence=row["sequence"], state=ExecutionState(row["state"]),
+            timestamp=row["timestamp"], event_fingerprint=row["event_fingerprint"],
+            detail=row["detail"], previous_fingerprint=row["previous_fingerprint"],
         )
 
     def verify(self, intent_id: str) -> bool:
         previous_sequence = 0
         previous_state: ExecutionState | None = None
+        previous_fingerprint = ""
         for event in self.events(intent_id):
             if event.sequence != previous_sequence + 1:
                 return False
@@ -169,10 +184,14 @@ class SandboxExecutionJournal:
                     return False
             elif event.state not in _ALLOWED_TRANSITIONS[previous_state]:
                 return False
+            if event.previous_fingerprint != previous_fingerprint:
+                return False
             if event.event_fingerprint != self._fingerprint(
-                event.intent_id, event.sequence, event.state, event.timestamp, event.detail
+                event.intent_id, event.sequence, event.state, event.timestamp,
+                event.detail, event.previous_fingerprint,
             ):
                 return False
             previous_sequence = event.sequence
             previous_state = event.state
+            previous_fingerprint = event.event_fingerprint
         return True
