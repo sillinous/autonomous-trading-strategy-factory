@@ -25,13 +25,13 @@ def test_risk_admission_removes_lowest_ranked_strategy_when_needed():
     returns = pd.DataFrame({"a": base, "b": independent, "c": rng.normal(0.0, 0.08, 80)})
 
     result = build_risk_aware_portfolio(
-        _ranked(), returns, policy=PortfolioRiskPolicy(max_portfolio_volatility=0.02)
+        _ranked(), returns, policy=PortfolioRiskPolicy(max_portfolio_volatility=0.0075)
     )
 
     assert result.admission_passed
     assert result.admitted_strategy_ids == ("a", "b")
     assert result.risk_rejected_strategy_ids == ("c",)
-    assert result.portfolio_volatility <= 0.02
+    assert result.portfolio_volatility <= 0.0075
 
 
 def test_risk_admission_is_deterministic():
@@ -50,6 +50,6 @@ def test_risk_rejects_all_when_even_single_strategy_is_too_volatile():
 
     assert not result.admission_passed
     assert result.admitted_strategy_ids == ()
-    assert set(result.risk_rejected_strategy_ids) == {"a", "b", "c"}
+    assert result.risk_rejected_strategy_ids == ("a",)
     assert result.allocation.weights == {}
     assert result.portfolio_volatility > 0.01
