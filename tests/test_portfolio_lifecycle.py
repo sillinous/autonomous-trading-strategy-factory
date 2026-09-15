@@ -57,7 +57,7 @@ def test_persist_rejects_selection_allocation_mismatch():
     tampered = type(portfolio)(
         ranked=portfolio.ranked,
         selection=portfolio.selection,
-        allocation=type(portfolio.allocation)(weights={"a": 1.0}, estimated_volatility=0.0, total_weight=1.0),
+        allocation=type(portfolio.allocation)(weights={"a": 1.0}, estimated_volatility={"a": 0.1}, total_weight=1.0),
         portfolio_volatility=portfolio.portfolio_volatility,
         admission_passed=portfolio.admission_passed,
         rejected_for_risk=portfolio.rejected_for_risk,
