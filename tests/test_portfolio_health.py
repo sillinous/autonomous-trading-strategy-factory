@@ -6,7 +6,7 @@ from atsf.portfolio_health import PortfolioHealthPolicy, assess_portfolio_health
 
 
 def test_healthy_portfolio():
-    returns = pd.DataFrame({"a": [0.01, 0.00, 0.02], "b": [0.00, 0.01, 0.00]})
+    returns = pd.DataFrame({"a": [0.01, 0.00, 0.02], "b": [0.00, 0.02, 0.00]})
     attribution = attribute_portfolio(returns, {"a": 0.5, "b": 0.5})
     result = assess_portfolio_health(attribution, observation_count=3)
     assert result.healthy
@@ -14,7 +14,7 @@ def test_healthy_portfolio():
     assert result.replace_strategy_ids == ()
 
 
-def test_concentration_identifies_replacement():
+def test_concentration_identifies_risk_contributor_for_replacement():
     returns = pd.DataFrame({"a": [0.10, 0.10, 0.10], "b": [0.00, 0.01, -0.01]})
     attribution = attribute_portfolio(returns, {"a": 0.9, "b": 0.1})
     result = assess_portfolio_health(
@@ -24,7 +24,7 @@ def test_concentration_identifies_replacement():
     )
     assert result.status == "REVIEW_REQUIRED"
     assert "concentration" in result.breached_limits
-    assert result.replace_strategy_ids == ("a",)
+    assert result.replace_strategy_ids == ("b",)
 
 
 def test_insufficient_observations_fail_closed():
