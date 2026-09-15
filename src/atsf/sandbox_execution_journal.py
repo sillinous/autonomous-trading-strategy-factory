@@ -9,6 +9,9 @@ from .registry import ExperimentRegistry
 from .sandbox_execution import ExecutionState
 
 
+_SCHEMA_VERSION = 2
+
+
 @dataclass(frozen=True)
 class ExecutionEvent:
     intent_id: str
@@ -18,6 +21,7 @@ class ExecutionEvent:
     event_fingerprint: str
     detail: str = ""
     previous_fingerprint: str = ""
+    schema_version: int = _SCHEMA_VERSION
 
 
 _ALLOWED_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
@@ -60,14 +64,23 @@ class SandboxExecutionJournal:
                     event_fingerprint TEXT NOT NULL UNIQUE,
                     detail TEXT NOT NULL DEFAULT '',
                     previous_fingerprint TEXT NOT NULL DEFAULT '',
+                    schema_version INTEGER NOT NULL DEFAULT 2,
                     PRIMARY KEY (intent_id, sequence),
-                    CHECK (state IN ('CREATED', 'VALIDATED', 'ADMITTED', 'CONSUMED', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED'))
+                    CHECK (state IN ('CREATED', 'VALIDATED', 'ADMITTED', 'CONSUMED', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED')),
+                    CHECK (schema_version = 2)
                 )"""
             )
-        elif "previous_fingerprint" not in columns:
-            self._connection.execute(
-                "ALTER TABLE sandbox_execution_events ADD COLUMN previous_fingerprint TEXT NOT NULL DEFAULT ''"
-            )
+        elif "previous_fingerprint" not in columns or "schema_version" not in columns:
+            raise ValueError("unsupported sandbox execution journal schema; explicit migration is required")
+        else:
+            versions = {
+                row[0]
+                for row in self._connection.execute(
+                    "SELECT DISTINCT schema_version FROM sandbox_execution_events"
+                ).fetchall()
+            }
+            if versions and versions != {_SCHEMA_VERSION}:
+                raise ValueError("unsupported sandbox execution journal schema version")
         self._connection.commit()
 
     @staticmethod
@@ -89,6 +102,22 @@ class SandboxExecutionJournal:
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         return sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _event_from_row(row) -> ExecutionEvent:
+        schema_version = int(row["schema_version"])
+        if schema_version != _SCHEMA_VERSION:
+            raise ValueError("unsupported sandbox execution journal schema version")
+        return ExecutionEvent(
+            intent_id=row["intent_id"],
+            sequence=row["sequence"],
+            state=ExecutionState(row["state"]),
+            timestamp=row["timestamp"],
+            event_fingerprint=row["event_fingerprint"],
+            detail=row["detail"],
+            previous_fingerprint=row["previous_fingerprint"],
+            schema_version=schema_version,
+        )
 
     def append_in_transaction(
         self,
@@ -128,11 +157,11 @@ class SandboxExecutionJournal:
         )
         self._connection.execute(
             """INSERT INTO sandbox_execution_events(
-                intent_id, sequence, state, timestamp, event_fingerprint, detail, previous_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                intent_id, sequence, state, timestamp, event_fingerprint, detail, previous_fingerprint, schema_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 intent_id, sequence, state.value, timestamp, event.event_fingerprint,
-                detail, previous_fingerprint,
+                detail, previous_fingerprint, _SCHEMA_VERSION,
             ),
         )
         return event
@@ -146,37 +175,22 @@ class SandboxExecutionJournal:
             "SELECT * FROM sandbox_execution_events WHERE intent_id = ? ORDER BY sequence",
             (intent_id,),
         ).fetchall()
-        return tuple(
-            ExecutionEvent(
-                intent_id=row["intent_id"],
-                sequence=row["sequence"],
-                state=ExecutionState(row["state"]),
-                timestamp=row["timestamp"],
-                event_fingerprint=row["event_fingerprint"],
-                detail=row["detail"],
-                previous_fingerprint=row["previous_fingerprint"],
-            )
-            for row in rows
-        )
+        return tuple(self._event_from_row(row) for row in rows)
 
     def latest(self, intent_id: str) -> ExecutionEvent | None:
         row = self._connection.execute(
             "SELECT * FROM sandbox_execution_events WHERE intent_id = ? ORDER BY sequence DESC LIMIT 1",
             (intent_id,),
         ).fetchone()
-        if row is None:
-            return None
-        return ExecutionEvent(
-            intent_id=row["intent_id"], sequence=row["sequence"], state=ExecutionState(row["state"]),
-            timestamp=row["timestamp"], event_fingerprint=row["event_fingerprint"],
-            detail=row["detail"], previous_fingerprint=row["previous_fingerprint"],
-        )
+        return None if row is None else self._event_from_row(row)
 
     def verify(self, intent_id: str) -> bool:
         previous_sequence = 0
         previous_state: ExecutionState | None = None
         previous_fingerprint = ""
         for event in self.events(intent_id):
+            if event.schema_version != _SCHEMA_VERSION:
+                return False
             if event.sequence != previous_sequence + 1:
                 return False
             if previous_state is None:
@@ -195,3 +209,12 @@ class SandboxExecutionJournal:
             previous_state = event.state
             previous_fingerprint = event.event_fingerprint
         return True
+
+    def recover_state(self, intent_id: str) -> ExecutionState | None:
+        """Recover persisted execution state only after full chain verification."""
+        events = self.events(intent_id)
+        if not events:
+            return None
+        if not self.verify(intent_id):
+            raise ValueError("sandbox execution journal integrity verification failed")
+        return events[-1].state
