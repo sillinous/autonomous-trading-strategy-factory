@@ -5,8 +5,9 @@ from math import isfinite
 
 import pandas as pd
 
-from .allocation import AllocationPolicy, PortfolioAllocation, allocate_inverse_volatility
-from .portfolio import PortfolioPolicy, PortfolioSelection, select_diversified_strategies
+from .allocation import AllocationPolicy, PortfolioAllocation
+from .portfolio import PortfolioPolicy, PortfolioSelection
+from .portfolio_risk import PortfolioRiskPolicy, build_risk_aware_portfolio
 from .ranking import RankedCandidate
 
 
@@ -31,54 +32,28 @@ class PortfolioIntelligenceResult:
     rejected_for_risk: tuple[str, ...]
 
 
-def _portfolio_volatility(returns: pd.DataFrame, allocation: PortfolioAllocation) -> float:
-    ids = tuple(allocation.weights)
-    if not ids:
-        return 0.0
-    selected = returns[list(ids)].astype(float).replace([float("inf"), float("-inf")], float("nan")).dropna()
-    if len(selected) < 2:
-        raise ValueError("at least two finite return observations are required")
-    weights = pd.Series(allocation.weights, index=ids, dtype=float)
-    covariance = selected[list(ids)].cov().to_numpy(dtype=float)
-    variance = float(weights.to_numpy() @ covariance @ weights.to_numpy())
-    if variance < 0 and variance > -1e-12:
-        variance = 0.0
-    if variance < 0 or not isfinite(variance):
-        raise ValueError("portfolio covariance produced an invalid variance")
-    volatility = variance ** 0.5
-    if not isfinite(volatility):
-        raise ValueError("portfolio volatility is not finite")
-    return volatility
-
-
 def build_portfolio_intelligence(
     ranked: tuple[RankedCandidate, ...],
     returns: pd.DataFrame,
     *,
     policy: PortfolioIntelligencePolicy | None = None,
 ) -> PortfolioIntelligenceResult:
-    """Turn strategy rankings into a deterministic risk-aware portfolio admission decision."""
+    """Build a deterministic portfolio with adaptive portfolio-level risk admission."""
     policy = policy or PortfolioIntelligencePolicy()
-    if not ranked:
-        raise ValueError("ranked candidates cannot be empty")
-    if returns.empty:
-        raise ValueError("returns cannot be empty")
-
-    ids = [candidate.candidate_id for candidate in ranked]
-    selection = select_diversified_strategies(returns, ids, policy.portfolio)
-    if not selection.selected:
-        raise ValueError("portfolio selection produced no strategies")
-
-    allocation = allocate_inverse_volatility(returns, selection.selected, policy.allocation)
-    volatility = _portfolio_volatility(returns, allocation)
-    passed = volatility <= policy.max_portfolio_volatility
-    rejected_for_risk = selection.selected if not passed else ()
-
+    result = build_risk_aware_portfolio(
+        ranked,
+        returns,
+        policy=PortfolioRiskPolicy(
+            portfolio=policy.portfolio,
+            allocation=policy.allocation,
+            max_portfolio_volatility=policy.max_portfolio_volatility,
+        ),
+    )
     return PortfolioIntelligenceResult(
         ranked=ranked,
-        selection=selection,
-        allocation=allocation,
-        portfolio_volatility=volatility,
-        admission_passed=passed,
-        rejected_for_risk=tuple(rejected_for_risk),
+        selection=result.selection,
+        allocation=result.allocation,
+        portfolio_volatility=result.portfolio_volatility,
+        admission_passed=result.admission_passed,
+        rejected_for_risk=result.risk_rejected_strategy_ids,
     )
