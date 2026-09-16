@@ -65,21 +65,32 @@ class ResearchCycleRegistry:
         self._connection.commit()
 
     def _backfill_audit(self) -> None:
+        """Create audit history only for an entirely uninitialized audit table.
+
+        A partially populated audit table is treated as corruption rather than
+        silently repaired, preserving evidence of missing historical coverage.
+        """
+        cycle_count = self._connection.execute("SELECT COUNT(*) FROM research_cycles").fetchone()[0]
+        audit_count = self._connection.execute("SELECT COUNT(*) FROM research_cycle_audit").fetchone()[0]
+        if audit_count == cycle_count:
+            return
+        if audit_count != 0:
+            raise ValueError("research cycle audit coverage is incomplete")
+        if cycle_count == 0:
+            return
+
         rows = self._connection.execute(
             "SELECT cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json FROM research_cycles ORDER BY generation, cycle_id"
         ).fetchall()
         previous = ""
         for row in rows:
             record = ResearchCycleRecord(*row)
-            existing = self._connection.execute(
-                "SELECT payload_digest, previous_digest FROM research_cycle_audit WHERE cycle_id = ?", (record.cycle_id,)
-            ).fetchone()
-            if existing is None:
-                self._connection.execute(
-                    "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
-                    (record.cycle_id, record.generation, self._digest(record), previous),
-                )
-            previous = self._digest(record)
+            digest = self._digest(record)
+            self._connection.execute(
+                "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
+                (record.cycle_id, record.generation, digest, previous),
+            )
+            previous = digest
 
     def save_cycle_in_transaction(
         self,
@@ -91,12 +102,7 @@ class ResearchCycleRegistry:
         admissions: Any,
         portfolio_feedback: Any = None,
     ) -> ResearchCycleRecord:
-        """Persist one cycle without committing the caller's transaction.
-
-        The caller owns the surrounding transaction, allowing cycle and audit
-        state to commit or roll back as one unit. Existing history is verified
-        before a new record can extend the audit chain.
-        """
+        """Persist one cycle without committing the caller's transaction."""
         if not isinstance(cycle_id, str) or not cycle_id.strip():
             raise ValueError("cycle_id is required")
         if not isinstance(generation, int) or generation < 0:
