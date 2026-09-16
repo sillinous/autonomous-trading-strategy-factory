@@ -4,6 +4,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
+from atsf.research_checkpoint import ResearchCheckpoint
 from atsf.research_cycle import ResearchCyclePolicy
 from atsf.research_cycle_registry import ResearchCycleRegistry
 from atsf.research_runner import ResearchRunPolicy, resume_research, run_research
@@ -188,6 +189,34 @@ def test_research_runner_persists_and_verifies_cycles_before_advancing():
     assert resumed.generations[0].generation == 2
     assert [record.generation for record in registry.list_cycles()] == [0, 1, 2]
     registry.verify()
+
+
+def test_research_runner_rejects_checkpoint_not_bound_to_durable_cycle():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    payload = checkpoint.to_dict()
+    payload["next_seed"] += 1
+    tampered = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
+
+    with pytest.raises(ValueError, match="does not match durable"):
+        resume_research(
+            tampered,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=3),
+            cycle_registry=registry,
+        )
+    assert [record.generation for record in registry.list_cycles()] == [0, 1]
 
 
 def test_research_runner_blocks_advancement_after_cycle_tampering():
