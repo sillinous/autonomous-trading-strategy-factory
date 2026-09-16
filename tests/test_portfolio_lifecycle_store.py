@@ -37,7 +37,6 @@ def test_round_trip_and_restart(tmp_path):
 
 
 def test_fingerprint_is_deterministic():
-    first = PortfolioLifecycleStore.new_record if False else None
     a = _record(PortfolioLifecycleStore(sqlite3.connect(":memory:")))
     b = _record(PortfolioLifecycleStore(sqlite3.connect(":memory:")))
     assert a.fingerprint == b.fingerprint
@@ -129,3 +128,25 @@ def test_nonfinite_record_is_rejected():
             breached_limits=(),
             replace_strategy_ids=(),
         )
+
+
+def test_append_in_transaction_rolls_back_cleanly():
+    connection = sqlite3.connect(":memory:")
+    store = PortfolioLifecycleStore(connection)
+    record = _record(store)
+    connection.execute("BEGIN")
+    store.append_in_transaction(record)
+    assert store.latest("portfolio-a") == record
+    connection.rollback()
+    assert store.latest("portfolio-a") is None
+
+
+def test_append_in_transaction_commits_with_outer_transaction():
+    connection = sqlite3.connect(":memory:")
+    store = PortfolioLifecycleStore(connection)
+    record = _record(store)
+    connection.execute("BEGIN")
+    store.append_in_transaction(record)
+    connection.commit()
+    assert store.latest("portfolio-a") == record
+    store.verify("portfolio-a")
