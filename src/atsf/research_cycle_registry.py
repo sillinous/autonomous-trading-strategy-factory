@@ -90,6 +90,8 @@ class ResearchCycleRegistry:
         admissions_json = self._payload(admissions)
         portfolio_feedback_json = self._payload(portfolio_feedback)
         record = ResearchCycleRecord(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json)
+        # Never advance the research state from an unverified historical chain.
+        self.verify()
         with self._connection:
             existing = self._connection.execute(
                 "SELECT generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json FROM research_cycles WHERE cycle_id = ?",
