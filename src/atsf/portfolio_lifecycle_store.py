@@ -196,7 +196,8 @@ class PortfolioLifecycleStore:
         _validate_record(record)
         return record
 
-    def append(self, record: PortfolioLifecycleRecord) -> PortfolioLifecycleRecord:
+    def append_in_transaction(self, record: PortfolioLifecycleRecord) -> PortfolioLifecycleRecord:
+        """Append a validated record without committing the surrounding transaction."""
         _validate_record(record)
         latest = self.latest(record.portfolio_id)
         if latest is not None and record.generation <= latest.generation:
@@ -227,6 +228,11 @@ class PortfolioLifecycleStore:
                 record.schema_version,
             ),
         )
+        return record
+
+    def append(self, record: PortfolioLifecycleRecord) -> PortfolioLifecycleRecord:
+        """Append a record as its own committed transaction."""
+        record = self.append_in_transaction(record)
         self._connection.commit()
         return record
 
