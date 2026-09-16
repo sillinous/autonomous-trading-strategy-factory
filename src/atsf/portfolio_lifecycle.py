@@ -20,7 +20,7 @@ def persist_portfolio_health(
     """Persist an auditable portfolio health decision without granting authority."""
     if not portfolio_id.strip():
         raise ValueError("portfolio_id must be non-empty")
-    if portfolio.selection.selected != tuple(portfolio.allocation.weights):
+    if set(portfolio.selection.selected) != set(portfolio.allocation.weights):
         raise ValueError("portfolio selection and allocation are inconsistent")
     record = store.new_record(
         portfolio_id=portfolio_id,
