@@ -8,7 +8,11 @@ from atsf.portfolio_health import PortfolioHealthPolicy, assess_portfolio_health
 def test_healthy_portfolio():
     returns = pd.DataFrame({"a": [0.01, 0.00, 0.02], "b": [0.00, 0.02, 0.00]})
     attribution = attribute_portfolio(returns, {"a": 0.5, "b": 0.5})
-    result = assess_portfolio_health(attribution, observation_count=3)
+    result = assess_portfolio_health(
+        attribution,
+        observation_count=3,
+        policy=PortfolioHealthPolicy(max_single_strategy_risk_fraction=1.0),
+    )
     assert result.healthy
     assert result.breached_limits == ()
     assert result.replace_strategy_ids == ()
