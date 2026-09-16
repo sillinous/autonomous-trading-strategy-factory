@@ -14,45 +14,50 @@ def test_cycle_registry_is_durable_and_ordered() -> None:
     assert registry.connection is connection
 
     first = registry.save_cycle(
-        "cycle:b",
-        2,
-        plan={"requests": ["r2"]},
-        feedback={"signals": ["s2"]},
-        admissions={"strategy_ids": ["c2"]},
+        "cycle:b", 2, plan={"requests": ["r2"]}, feedback={"signals": ["s2"]}, admissions={"strategy_ids": ["c2"]}
     )
     registry.save_cycle(
-        "cycle:a",
-        1,
-        plan={"requests": ["r1"]},
-        feedback={"signals": ["s1"]},
-        admissions={"strategy_ids": ["c1"]},
+        "cycle:a", 1, plan={"requests": ["r1"]}, feedback={"signals": ["s1"]}, admissions={"strategy_ids": ["c1"]}
     )
-
     assert registry.get_cycle("cycle:b") == first
     assert [item.cycle_id for item in registry.list_cycles()] == ["cycle:a", "cycle:b"]
     assert json.loads(first.plan_json) == {"requests": ["r2"]}
+    registry.verify()
 
 
 def test_identical_replay_is_idempotent_but_changed_replay_fails_closed() -> None:
-    connection = sqlite3.connect(":memory:")
-    registry = ResearchCycleRegistry(connection)
-    kwargs = {
-        "plan": {"requests": ["r"]},
-        "feedback": {"signals": ["s"]},
-        "admissions": {"strategy_ids": ["c"]},
-    }
-
+    registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
+    kwargs = {"plan": {"requests": ["r"]}, "feedback": {"signals": ["s"]}, "admissions": {"strategy_ids": ["c"]}}
     first = registry.save_cycle("cycle:1", 1, **kwargs)
     assert registry.save_cycle("cycle:1", 1, **kwargs) == first
-
     with pytest.raises(ValueError, match="immutable"):
         registry.save_cycle("cycle:1", 1, plan={"requests": ["changed"]}, **{k: v for k, v in kwargs.items() if k != "plan"})
 
 
 def test_cycle_validation_fails_closed() -> None:
     registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
-
     with pytest.raises(ValueError, match="cycle_id"):
         registry.save_cycle("", 0, plan={}, feedback={}, admissions={})
     with pytest.raises(ValueError, match="nonnegative"):
         registry.save_cycle("cycle", -1, plan={}, feedback={}, admissions={})
+
+
+def test_tampered_cycle_payload_fails_audit_verification() -> None:
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    registry.save_cycle("cycle:1", 1, plan={"requests": ["r"]}, feedback={}, admissions={})
+    connection.execute("UPDATE research_cycles SET feedback_json = ? WHERE cycle_id = ?", ('{"signals":["tampered"]}', "cycle:1"))
+    connection.commit()
+    with pytest.raises(ValueError, match="integrity verification failed"):
+        registry.verify()
+
+
+def test_tampered_audit_chain_fails_verification() -> None:
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    registry.save_cycle("cycle:1", 1, plan={}, feedback={}, admissions={})
+    registry.save_cycle("cycle:2", 2, plan={}, feedback={}, admissions={})
+    connection.execute("UPDATE research_cycle_audit SET previous_digest = 'tampered' WHERE cycle_id = 'cycle:2'")
+    connection.commit()
+    with pytest.raises(ValueError, match="integrity verification failed"):
+        registry.verify()
