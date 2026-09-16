@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Callable
 
 from .adaptive_evolution import AdaptiveEvolutionPolicy
@@ -50,8 +51,13 @@ class ResearchRunResult:
 CandidateEvaluator = Callable[[Candidate], CandidateEvaluation]
 
 
-def _persist_cycle(registry: ResearchCycleRegistry, result: ResearchCycleResult, seed: int) -> None:
-    """Persist only deterministic research state; never execution authority."""
+def _persist_cycle(
+    registry: ResearchCycleRegistry,
+    result: ResearchCycleResult,
+    seed: int,
+    checkpoint_digest: str,
+) -> None:
+    """Persist deterministic research state bound to its restart checkpoint."""
     registry.save_cycle_in_transaction(
         f"generation-{result.generation}",
         result.generation,
@@ -59,6 +65,7 @@ def _persist_cycle(registry: ResearchCycleRegistry, result: ResearchCycleResult,
             "seed": seed,
             "crossover_rate": result.metrics.crossover_rate,
             "mutation_rate": result.metrics.mutation_rate,
+            "checkpoint_digest": checkpoint_digest,
         },
         feedback={
             "candidate_count": result.metrics.candidate_count,
@@ -75,6 +82,24 @@ def _persist_cycle(registry: ResearchCycleRegistry, result: ResearchCycleResult,
         },
         portfolio_feedback=None,
     )
+
+
+def _verify_checkpoint_binding(
+    registry: ResearchCycleRegistry,
+    checkpoint: ResearchCheckpoint,
+) -> None:
+    """Require durable cycle evidence to identify the exact supplied checkpoint."""
+    if checkpoint.next_generation == 0:
+        return
+    record = registry.get_cycle(f"generation-{checkpoint.next_generation - 1}")
+    if record is None:
+        raise ValueError("checkpoint has no durable research-cycle evidence")
+    try:
+        plan = json.loads(record.plan_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("durable research-cycle plan is invalid") from exc
+    if plan.get("checkpoint_digest") != checkpoint.state_digest:
+        raise ValueError("checkpoint does not match durable research-cycle evidence")
 
 
 def _run_from_state(
@@ -99,7 +124,6 @@ def _run_from_state(
 
     while generation < run_policy.max_generations:
         if cycle_registry is not None:
-            # A restart must prove historical integrity before it can evolve again.
             cycle_registry.verify()
 
         generation_seed = seed
@@ -137,9 +161,8 @@ def _run_from_state(
             stopped=stopped,
         )
         if cycle_registry is not None:
-            # Persist before exposing this generation as a restartable result.
             with cycle_registry.connection:
-                _persist_cycle(cycle_registry, result, generation_seed)
+                _persist_cycle(cycle_registry, result, generation_seed, checkpoint.state_digest)
         checkpoints.append(checkpoint)
         if stopped:
             break
@@ -202,6 +225,9 @@ def resume_research(
         raise ValueError("cannot resume a stopped checkpoint")
     if checkpoint.next_generation > run_policy.max_generations:
         raise ValueError("checkpoint next_generation exceeds max_generations")
+    if cycle_registry is not None:
+        cycle_registry.verify()
+        _verify_checkpoint_binding(cycle_registry, checkpoint)
     return _run_from_state(
         list(checkpoint.population),
         evaluator,
