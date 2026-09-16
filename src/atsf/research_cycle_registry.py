@@ -94,7 +94,8 @@ class ResearchCycleRegistry:
         """Persist one cycle without committing the caller's transaction.
 
         The caller owns the surrounding transaction, allowing cycle and audit
-        state to commit or roll back as one unit.
+        state to commit or roll back as one unit. Existing history is verified
+        before a new record can extend the audit chain.
         """
         if not isinstance(cycle_id, str) or not cycle_id.strip():
             raise ValueError("cycle_id is required")
@@ -105,6 +106,7 @@ class ResearchCycleRegistry:
         admissions_json = self._payload(admissions)
         portfolio_feedback_json = self._payload(portfolio_feedback)
         record = ResearchCycleRecord(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json)
+        self.verify()
         existing = self._connection.execute(
             "SELECT generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json FROM research_cycles WHERE cycle_id = ?",
             (cycle_id,),
