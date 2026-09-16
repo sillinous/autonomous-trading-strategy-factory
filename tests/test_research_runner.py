@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+import sqlite3
 
 import pandas as pd
 import pytest
 
 from atsf.research_cycle import ResearchCyclePolicy
+from atsf.research_cycle_registry import ResearchCycleRegistry
 from atsf.research_runner import ResearchRunPolicy, resume_research, run_research
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
@@ -160,3 +162,81 @@ def test_research_run_policy_validates_bounds():
         ResearchRunPolicy(improvement_epsilon=-1)
     with pytest.raises(ValueError, match="stagnation"):
         ResearchRunPolicy(stop_on_stagnation=0)
+
+
+def test_research_runner_persists_and_verifies_cycles_before_advancing():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+    )
+
+    assert [record.generation for record in registry.list_cycles()] == [0, 1]
+    registry.verify()
+    resumed = resume_research(
+        result.final_checkpoint,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=3),
+        cycle_registry=registry,
+    )
+    assert resumed.generations[0].generation == 2
+    assert [record.generation for record in registry.list_cycles()] == [0, 1, 2]
+    registry.verify()
+
+
+def test_research_runner_blocks_advancement_after_cycle_tampering():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+    )
+    connection.execute("UPDATE research_cycles SET feedback_json = '{}' WHERE cycle_id = 'generation-0'")
+    connection.commit()
+
+    with pytest.raises(ValueError, match="integrity"):
+        resume_research(
+            result.final_checkpoint,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=3),
+            cycle_registry=registry,
+        )
+
+    assert [record.generation for record in registry.list_cycles()] == [0, 1]
+
+
+def test_research_runner_blocks_advancement_after_audit_tampering():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+    )
+    connection.execute("UPDATE research_cycle_audit SET previous_digest = 'tampered' WHERE sequence = 2")
+    connection.commit()
+
+    with pytest.raises(ValueError, match="integrity"):
+        resume_research(
+            result.final_checkpoint,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=3),
+            cycle_registry=registry,
+        )
+
+    assert [record.generation for record in registry.list_cycles()] == [0, 1]
