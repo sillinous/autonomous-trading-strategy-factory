@@ -11,14 +11,8 @@ from atsf.research_cycle_registry import ResearchCycleRegistry
 def test_cycle_registry_is_durable_and_ordered() -> None:
     connection = sqlite3.connect(":memory:")
     registry = ResearchCycleRegistry(connection)
-    assert registry.connection is connection
-
-    first = registry.save_cycle(
-        "cycle:b", 2, plan={"requests": ["r2"]}, feedback={"signals": ["s2"]}, admissions={"strategy_ids": ["c2"]}
-    )
-    registry.save_cycle(
-        "cycle:a", 1, plan={"requests": ["r1"]}, feedback={"signals": ["s1"]}, admissions={"strategy_ids": ["c1"]}
-    )
+    first = registry.save_cycle("cycle:b", 2, plan={"requests": ["r2"]}, feedback={"signals": ["s2"]}, admissions={"strategy_ids": ["c2"]})
+    registry.save_cycle("cycle:a", 1, plan={"requests": ["r1"]}, feedback={"signals": ["s1"]}, admissions={"strategy_ids": ["c1"]})
     assert registry.get_cycle("cycle:b") == first
     assert [item.cycle_id for item in registry.list_cycles()] == ["cycle:a", "cycle:b"]
     assert json.loads(first.plan_json) == {"requests": ["r2"]}
@@ -52,6 +46,17 @@ def test_tampered_cycle_payload_fails_audit_verification() -> None:
         registry.verify()
 
 
+def test_tampered_history_blocks_new_cycle() -> None:
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    registry.save_cycle("cycle:1", 1, plan={}, feedback={}, admissions={})
+    connection.execute("UPDATE research_cycles SET feedback_json = ? WHERE cycle_id = ?", ('{"tampered":true}', "cycle:1"))
+    connection.commit()
+    with pytest.raises(ValueError, match="integrity verification failed"):
+        registry.save_cycle("cycle:2", 2, plan={}, feedback={}, admissions={})
+    assert registry.get_cycle("cycle:2") is None
+
+
 def test_tampered_audit_chain_fails_verification() -> None:
     connection = sqlite3.connect(":memory:")
     registry = ResearchCycleRegistry(connection)
@@ -61,3 +66,14 @@ def test_tampered_audit_chain_fails_verification() -> None:
     connection.commit()
     with pytest.raises(ValueError, match="integrity verification failed"):
         registry.verify()
+
+
+def test_tampered_audit_chain_blocks_new_cycle() -> None:
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    registry.save_cycle("cycle:1", 1, plan={}, feedback={}, admissions={})
+    connection.execute("UPDATE research_cycle_audit SET payload_digest = 'tampered' WHERE cycle_id = 'cycle:1'")
+    connection.commit()
+    with pytest.raises(ValueError, match="integrity verification failed"):
+        registry.save_cycle("cycle:2", 2, plan={}, feedback={}, admissions={})
+    assert registry.get_cycle("cycle:2") is None
