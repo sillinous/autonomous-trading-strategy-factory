@@ -61,6 +61,7 @@ class ResearchCycleRegistry:
         if "portfolio_feedback_json" not in columns:
             self._connection.execute("ALTER TABLE research_cycles ADD COLUMN portfolio_feedback_json TEXT NOT NULL DEFAULT 'null'")
         self._backfill_audit()
+        self.verify()
         self._connection.commit()
 
     def _backfill_audit(self) -> None:
@@ -80,7 +81,21 @@ class ResearchCycleRegistry:
                 )
             previous = self._digest(record)
 
-    def save_cycle(self, cycle_id: str, generation: int, *, plan: Any, feedback: Any, admissions: Any, portfolio_feedback: Any = None) -> ResearchCycleRecord:
+    def save_cycle_in_transaction(
+        self,
+        cycle_id: str,
+        generation: int,
+        *,
+        plan: Any,
+        feedback: Any,
+        admissions: Any,
+        portfolio_feedback: Any = None,
+    ) -> ResearchCycleRecord:
+        """Persist one cycle without committing the caller's transaction.
+
+        The caller owns the surrounding transaction, allowing cycle and audit
+        state to commit or roll back as one unit.
+        """
         if not isinstance(cycle_id, str) or not cycle_id.strip():
             raise ValueError("cycle_id is required")
         if not isinstance(generation, int) or generation < 0:
@@ -90,28 +105,38 @@ class ResearchCycleRegistry:
         admissions_json = self._payload(admissions)
         portfolio_feedback_json = self._payload(portfolio_feedback)
         record = ResearchCycleRecord(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json)
-        # Never advance the research state from an unverified historical chain.
-        self.verify()
-        with self._connection:
-            existing = self._connection.execute(
-                "SELECT generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json FROM research_cycles WHERE cycle_id = ?",
-                (cycle_id,),
-            ).fetchone()
-            expected = (generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json)
-            if existing is not None:
-                if tuple(existing) != expected:
-                    raise ValueError("research cycle is immutable")
-                return record
-            self._connection.execute(
-                "INSERT INTO research_cycles(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json) VALUES (?, ?, ?, ?, ?, ?)",
-                (cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json),
-            )
-            previous = self._connection.execute("SELECT payload_digest FROM research_cycle_audit ORDER BY sequence DESC LIMIT 1").fetchone()
-            self._connection.execute(
-                "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
-                (cycle_id, generation, self._digest(record), "" if previous is None else previous[0]),
-            )
+        existing = self._connection.execute(
+            "SELECT generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json FROM research_cycles WHERE cycle_id = ?",
+            (cycle_id,),
+        ).fetchone()
+        expected = (generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json)
+        if existing is not None:
+            if tuple(existing) != expected:
+                raise ValueError("research cycle is immutable")
+            return record
+        previous = self._connection.execute(
+            "SELECT payload_digest FROM research_cycle_audit ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+        self._connection.execute(
+            "INSERT INTO research_cycles(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json),
+        )
+        self._connection.execute(
+            "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
+            (cycle_id, generation, self._digest(record), "" if previous is None else previous[0]),
+        )
         return record
+
+    def save_cycle(self, cycle_id: str, generation: int, *, plan: Any, feedback: Any, admissions: Any, portfolio_feedback: Any = None) -> ResearchCycleRecord:
+        with self._connection:
+            return self.save_cycle_in_transaction(
+                cycle_id,
+                generation,
+                plan=plan,
+                feedback=feedback,
+                admissions=admissions,
+                portfolio_feedback=portfolio_feedback,
+            )
 
     def verify(self) -> None:
         """Verify cycle payloads and the tamper-evident audit chain."""
