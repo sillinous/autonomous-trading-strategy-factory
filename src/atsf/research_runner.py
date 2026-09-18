@@ -10,6 +10,7 @@ from .population import Candidate
 from .research_checkpoint import ResearchCheckpoint
 from .research_cycle import ResearchCyclePolicy, ResearchCycleResult, run_research_cycle
 from .research_cycle_registry import ResearchCycleRegistry
+from .research_checkpoint_store import ResearchCheckpointStore
 from .research_history import ResearchHistory
 from .research_provenance import GenerationProvenance, build_generation_provenance
 
@@ -115,6 +116,7 @@ def _run_from_state(
     run_policy: ResearchRunPolicy,
     adaptive_policy: AdaptiveEvolutionPolicy | None,
     cycle_registry: ResearchCycleRegistry | None,
+    checkpoint_store: ResearchCheckpointStore | None,
 ) -> ResearchRunResult:
     results: list[ResearchCycleResult] = []
     provenance = list(prior_provenance)
@@ -163,6 +165,8 @@ def _run_from_state(
         if cycle_registry is not None:
             with cycle_registry.connection:
                 _persist_cycle(cycle_registry, result, generation_seed, checkpoint.state_digest)
+                if checkpoint_store is not None:
+                    checkpoint_store.save_in_transaction(checkpoint, cycle_id=f"generation-{result.generation}")
         checkpoints.append(checkpoint)
         if stopped:
             break
@@ -188,6 +192,7 @@ def run_research(
     adaptive_policy: AdaptiveEvolutionPolicy | None = None,
     seed: int = 0,
     cycle_registry: ResearchCycleRegistry | None = None,
+    checkpoint_store: ResearchCheckpointStore | None = None,
 ) -> ResearchRunResult:
     """Run bounded deterministic research generations without execution authority."""
     run_policy = run_policy or ResearchRunPolicy()
@@ -203,6 +208,7 @@ def run_research(
         run_policy=run_policy,
         adaptive_policy=adaptive_policy,
         cycle_registry=cycle_registry,
+        checkpoint_store=checkpoint_store,
     )
 
 
@@ -214,6 +220,7 @@ def resume_research(
     run_policy: ResearchRunPolicy | None = None,
     adaptive_policy: AdaptiveEvolutionPolicy | None = None,
     cycle_registry: ResearchCycleRegistry | None = None,
+    checkpoint_store: ResearchCheckpointStore | None = None,
 ) -> ResearchRunResult:
     """Resume a deterministic research run from a validated checkpoint.
 
@@ -225,9 +232,16 @@ def resume_research(
         raise ValueError("cannot resume a stopped checkpoint")
     if checkpoint.next_generation > run_policy.max_generations:
         raise ValueError("checkpoint next_generation exceeds max_generations")
+    if checkpoint_store is not None and cycle_registry is None:
+        raise ValueError("checkpoint_store requires cycle_registry")
     if cycle_registry is not None:
         cycle_registry.verify()
         _verify_checkpoint_binding(cycle_registry, checkpoint)
+        if checkpoint_store is not None:
+            checkpoint_store.verify()
+            durable = checkpoint_store.load(checkpoint.next_generation)
+            if durable != checkpoint:
+                raise ValueError("checkpoint does not match durable checkpoint store")
     return _run_from_state(
         list(checkpoint.population),
         evaluator,
@@ -240,4 +254,5 @@ def resume_research(
         run_policy=run_policy,
         adaptive_policy=adaptive_policy,
         cycle_registry=cycle_registry,
+        checkpoint_store=checkpoint_store,
     )
