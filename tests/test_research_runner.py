@@ -7,6 +7,7 @@ import pytest
 from atsf.research_checkpoint import ResearchCheckpoint
 from atsf.research_cycle import ResearchCyclePolicy
 from atsf.research_cycle_registry import ResearchCycleRegistry
+from atsf.research_checkpoint_store import ResearchCheckpointStore
 from atsf.research_runner import ResearchRunPolicy, resume_research, run_research
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
@@ -269,3 +270,66 @@ def test_research_runner_blocks_advancement_after_audit_tampering():
         )
 
     assert [record.generation for record in registry.list_cycles()] == [0, 1]
+
+
+def test_research_runner_persists_checkpoint_atomically_with_cycle():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+        checkpoint_store=checkpoint_store,
+    )
+
+    assert checkpoint_store.latest() == result.final_checkpoint
+    assert checkpoint_store.get(1) is not None
+    assert checkpoint_store.get(2) is not None
+    registry.verify()
+    checkpoint_store.verify()
+
+
+def test_research_runner_requires_registry_for_checkpoint_store():
+    with pytest.raises(ValueError, match="requires cycle_registry"):
+        run_research(
+            make_parent_population(),
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=1),
+            checkpoint_store=ResearchCheckpointStore(sqlite3.connect(":memory:")),
+        )
+
+
+def test_research_runner_resume_rejects_durable_checkpoint_mismatch():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+        cycle_registry=registry,
+        checkpoint_store=checkpoint_store,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    payload = checkpoint.to_dict()
+    payload["next_seed"] += 1
+    tampered = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
+
+    with pytest.raises(ValueError, match="does not match durable checkpoint store"):
+        resume_research(
+            tampered,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=2),
+            cycle_registry=registry,
+            checkpoint_store=checkpoint_store,
+        )
