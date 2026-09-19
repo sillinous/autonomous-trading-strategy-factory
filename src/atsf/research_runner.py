@@ -11,6 +11,7 @@ from .research_checkpoint import ResearchCheckpoint
 from .research_cycle import ResearchCyclePolicy, ResearchCycleResult, run_research_cycle
 from .research_cycle_registry import ResearchCycleRegistry
 from .research_checkpoint_store import ResearchCheckpointStore
+from .research_control_plane import ResearchControlPlane
 from .research_history import ResearchHistory
 from .research_provenance import GenerationProvenance, build_generation_provenance
 
@@ -117,6 +118,7 @@ def _run_from_state(
     adaptive_policy: AdaptiveEvolutionPolicy | None,
     cycle_registry: ResearchCycleRegistry | None,
     checkpoint_store: ResearchCheckpointStore | None,
+    control_plane: ResearchControlPlane | None = None,
 ) -> ResearchRunResult:
     results: list[ResearchCycleResult] = []
     provenance = list(prior_provenance)
@@ -162,11 +164,19 @@ def _run_from_state(
             provenance=tuple(provenance),
             stopped=stopped,
         )
-        if cycle_registry is not None:
+        if control_plane is not None:
+            control_plane.persist_generation(
+                result,
+                seed=generation_seed,
+                checkpoint=checkpoint,
+            )
+        elif cycle_registry is not None:
             with cycle_registry.connection:
                 _persist_cycle(cycle_registry, result, generation_seed, checkpoint.state_digest)
                 if checkpoint_store is not None:
-                    checkpoint_store.save_in_transaction(checkpoint, cycle_id=f"generation-{result.generation}")
+                    checkpoint_store.save_in_transaction(
+                        checkpoint, cycle_id=f"generation-{result.generation}"
+                    )
         checkpoints.append(checkpoint)
         if stopped:
             break
@@ -198,6 +208,15 @@ def run_research(
     run_policy = run_policy or ResearchRunPolicy()
     if checkpoint_store is not None and cycle_registry is None:
         raise ValueError("checkpoint_store requires cycle_registry")
+    control_plane = (
+        ResearchControlPlane(
+            cycle_registry.connection,
+            cycle_registry=cycle_registry,
+            checkpoint_store=checkpoint_store,
+        )
+        if cycle_registry is not None and checkpoint_store is not None
+        else None
+    )
     return _run_from_state(
         population,
         evaluator,
@@ -225,9 +244,13 @@ def resume_research_from_store(
     """Resume from the latest durable checkpoint after cross-store verification."""
     if checkpoint_store.connection is not cycle_registry.connection:
         raise ValueError("checkpoint_store and cycle_registry must share a connection")
-    checkpoint_store.verify()
-    cycle_registry.verify()
-    checkpoint = checkpoint_store.latest()
+    control_plane = ResearchControlPlane(
+        cycle_registry.connection,
+        cycle_registry=cycle_registry,
+        checkpoint_store=checkpoint_store,
+    )
+    control_plane.verify()
+    checkpoint = control_plane.latest_checkpoint()
     if checkpoint is None:
         raise ValueError("no durable research checkpoint is available")
     _verify_checkpoint_binding(cycle_registry, checkpoint)
@@ -264,11 +287,19 @@ def resume_research(
         raise ValueError("checkpoint next_generation exceeds max_generations")
     if checkpoint_store is not None and cycle_registry is None:
         raise ValueError("checkpoint_store requires cycle_registry")
+    control_plane = None
     if cycle_registry is not None:
         cycle_registry.verify()
         _verify_checkpoint_binding(cycle_registry, checkpoint)
         if checkpoint_store is not None:
-            checkpoint_store.verify()
+            if checkpoint_store.connection is not cycle_registry.connection:
+                raise ValueError("checkpoint_store and cycle_registry must share a connection")
+            control_plane = ResearchControlPlane(
+                cycle_registry.connection,
+                cycle_registry=cycle_registry,
+                checkpoint_store=checkpoint_store,
+            )
+            control_plane.verify()
             durable = checkpoint_store.load(checkpoint.next_generation)
             if durable != checkpoint:
                 raise ValueError("checkpoint does not match durable checkpoint store")
@@ -285,4 +316,5 @@ def resume_research(
         adaptive_policy=adaptive_policy,
         cycle_registry=cycle_registry,
         checkpoint_store=checkpoint_store,
+        control_plane=control_plane,
     )
