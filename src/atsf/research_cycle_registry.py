@@ -107,6 +107,9 @@ class ResearchCycleRegistry:
             raise ValueError("cycle_id is required")
         if not isinstance(generation, int) or generation < 0:
             raise ValueError("generation must be a nonnegative integer")
+        expected_cycle_id = f"generation-{generation}"
+        if cycle_id != expected_cycle_id:
+            raise ValueError("cycle_id does not match generation")
         plan_json = self._payload(plan)
         feedback_json = self._payload(feedback)
         admissions_json = self._payload(admissions)
@@ -122,16 +125,18 @@ class ResearchCycleRegistry:
             if tuple(existing) != expected:
                 raise ValueError("research cycle is immutable")
             return record
-        previous = self._connection.execute(
-            "SELECT payload_digest FROM research_cycle_audit ORDER BY sequence DESC LIMIT 1"
+        previous_row = self._connection.execute(
+            "SELECT generation, payload_digest FROM research_cycle_audit ORDER BY sequence DESC LIMIT 1"
         ).fetchone()
+        if previous_row is not None and generation != previous_row[0] + 1:
+            raise ValueError("research cycle generation sequence is invalid")
         self._connection.execute(
             "INSERT INTO research_cycles(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json) VALUES (?, ?, ?, ?, ?, ?)",
             (cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json),
         )
         self._connection.execute(
             "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
-            (cycle_id, generation, self._digest(record), "" if previous is None else previous[0]),
+            (cycle_id, generation, self._digest(record), "" if previous_row is None else previous_row[1]),
         )
         return record
 
@@ -152,11 +157,16 @@ class ResearchCycleRegistry:
             "SELECT sequence, cycle_id, generation, payload_digest, previous_digest FROM research_cycle_audit ORDER BY sequence"
         ).fetchall()
         previous = ""
+        previous_generation = -1
         seen: set[str] = set()
         for _, cycle_id, generation, digest, previous_digest in rows:
             if cycle_id in seen:
                 raise ValueError("duplicate research cycle audit entry")
             seen.add(cycle_id)
+            if cycle_id != f"generation-{generation}":
+                raise ValueError("research cycle ID does not match generation")
+            if generation != previous_generation + 1:
+                raise ValueError("research cycle generation sequence is invalid")
             record = self.get_cycle(cycle_id)
             if record is None or record.generation != generation:
                 raise ValueError("research cycle audit record mismatch")
@@ -164,6 +174,7 @@ class ResearchCycleRegistry:
             if digest != expected or previous_digest != previous:
                 raise ValueError("research cycle audit integrity verification failed")
             previous = digest
+            previous_generation = generation
         count = self._connection.execute("SELECT COUNT(*) FROM research_cycles").fetchone()[0]
         if len(rows) != count:
             raise ValueError("research cycle audit coverage is incomplete")
