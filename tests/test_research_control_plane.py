@@ -133,3 +133,51 @@ def test_control_plane_rejects_generation_without_checkpoint():
 
     with pytest.raises(ValueError, match="research cycle not found"):
         control.verify_generation(1)
+
+
+def test_control_plane_rejects_checkpoint_seed_mismatch_before_persisting():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    tampered = checkpoint.to_dict()
+    tampered["next_seed"] = checkpoint.next_seed + 10
+    tampered["state_digest"] = ""
+    from atsf.research_checkpoint import ResearchCheckpoint
+    invalid = ResearchCheckpoint.from_dict(tampered)
+
+    with pytest.raises(ValueError, match="next_seed does not follow"):
+        control.persist_generation(result.generations[0], seed=17, checkpoint=invalid)
+
+    assert control.cycle_registry.list_cycles() == []
+    assert control.checkpoint_store.latest() is None
+
+
+def test_control_plane_fails_closed_on_malformed_cycle_plan():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+    connection.execute(
+        "UPDATE research_cycles SET plan_json = ? WHERE cycle_id = ?",
+        ("{not-json", "generation-0"),
+    )
+    connection.commit()
+
+    with pytest.raises(ValueError, match="plan is invalid"):
+        control.verify_generation(0)
