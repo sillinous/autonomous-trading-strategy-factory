@@ -96,3 +96,40 @@ def test_control_plane_rollback_is_atomic():
 
     assert control.cycle_registry.list_cycles() == []
     assert control.checkpoint_store.latest() is None
+
+
+def test_control_plane_verifies_generation_pair():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+
+    pair = control.verify_generation(0)
+    assert pair.cycle.generation == 0
+    assert pair.checkpoint == checkpoint
+
+
+def test_control_plane_rejects_generation_without_checkpoint():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+
+    with pytest.raises(ValueError, match="research cycle not found"):
+        control.verify_generation(1)
