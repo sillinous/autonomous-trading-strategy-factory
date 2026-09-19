@@ -73,6 +73,9 @@ class ResearchCheckpointStore:
             raise ValueError("cycle_id is required")
         if checkpoint.next_generation < 1:
             raise ValueError("durable checkpoint must follow a completed generation")
+        expected_cycle_id = f"generation-{checkpoint.next_generation - 1}"
+        if cycle_id != expected_cycle_id:
+            raise ValueError("checkpoint cycle ID does not match completed generation")
         payload_json = checkpoint.to_json()
         decoded = ResearchCheckpoint.from_json(payload_json)
         if decoded.state_digest != checkpoint.state_digest:
@@ -173,6 +176,8 @@ class ResearchCheckpointStore:
                 raise ValueError("research checkpoint ID does not match generation")
             if not record.cycle_id.strip():
                 raise ValueError("research checkpoint cycle ID is required")
+            if record.cycle_id != f"generation-{record.next_generation - 1}":
+                raise ValueError("research checkpoint cycle ID does not match generation")
             try:
                 checkpoint = ResearchCheckpoint.from_json(record.payload_json)
             except ValueError as exc:
