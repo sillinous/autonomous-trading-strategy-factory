@@ -196,6 +196,8 @@ def run_research(
 ) -> ResearchRunResult:
     """Run bounded deterministic research generations without execution authority."""
     run_policy = run_policy or ResearchRunPolicy()
+    if checkpoint_store is not None and cycle_registry is None:
+        raise ValueError("checkpoint_store requires cycle_registry")
     return _run_from_state(
         population,
         evaluator,
