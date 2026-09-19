@@ -57,6 +57,10 @@ class ResearchControlPlane:
                 raise ValueError("durable research-cycle plan is invalid") from exc
             if plan.get("checkpoint_digest") != checkpoint.state_digest:
                 raise ValueError("durable checkpoint does not match research-cycle evidence")
+            if not isinstance(plan.get("seed"), int) or isinstance(plan.get("seed"), bool):
+                raise ValueError("durable research-cycle seed is invalid")
+            if checkpoint.next_seed != plan["seed"] + 1:
+                raise ValueError("durable checkpoint seed does not follow research-cycle seed")
 
     def persist_generation(
         self,
@@ -71,6 +75,10 @@ class ResearchControlPlane:
             raise ValueError("checkpoint generation does not follow research cycle")
         if checkpoint.state_digest == "":
             raise ValueError("checkpoint state digest is required")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise ValueError("research-cycle seed must be an integer")
+        if checkpoint.next_seed != seed + 1:
+            raise ValueError("checkpoint next_seed does not follow research-cycle seed")
         cycle_id = f"generation-{result.generation}"
         if result.metrics.generation != result.generation:
             raise ValueError("research-cycle metrics generation mismatch")
@@ -116,7 +124,6 @@ class ResearchControlPlane:
         self.verify()
         return self.checkpoint_store.latest()
 
-
     def verify_generation(
         self,
         generation: int,
@@ -129,9 +136,16 @@ class ResearchControlPlane:
         if cycle is None:
             raise ValueError("research cycle not found")
         checkpoint = self.checkpoint_store.load(generation + 1)
-        expected_digest = json.loads(cycle.plan_json).get("checkpoint_digest")
-        if expected_digest != checkpoint.state_digest:
+        try:
+            plan = json.loads(cycle.plan_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("durable research-cycle plan is invalid") from exc
+        if plan.get("checkpoint_digest") != checkpoint.state_digest:
             raise ValueError("durable checkpoint does not match research-cycle evidence")
+        if not isinstance(plan.get("seed"), int) or isinstance(plan.get("seed"), bool):
+            raise ValueError("durable research-cycle seed is invalid")
+        if checkpoint.next_seed != plan["seed"] + 1:
+            raise ValueError("durable checkpoint seed does not follow research-cycle seed")
         self.verify()
         return ResearchControlPlaneRecord(cycle=cycle, checkpoint=checkpoint)
 
