@@ -127,7 +127,12 @@ def _run_from_state(
     stopped = False
 
     while generation < run_policy.max_generations:
-        if cycle_registry is not None:
+        if control_plane is not None:
+            if generation > 0:
+                control_plane.verify_generation(generation - 1)
+            else:
+                control_plane.verify()
+        elif cycle_registry is not None:
             cycle_registry.verify()
 
         generation_seed = seed
@@ -230,6 +235,7 @@ def run_research(
         adaptive_policy=adaptive_policy,
         cycle_registry=cycle_registry,
         checkpoint_store=checkpoint_store,
+        control_plane=control_plane,
     )
 
 def resume_research_from_store(
@@ -254,6 +260,7 @@ def resume_research_from_store(
     if checkpoint is None:
         raise ValueError("no durable research checkpoint is available")
     _verify_checkpoint_binding(cycle_registry, checkpoint)
+    control_plane.verify_generation(checkpoint.next_generation - 1)
     return resume_research(
         checkpoint,
         evaluator,
