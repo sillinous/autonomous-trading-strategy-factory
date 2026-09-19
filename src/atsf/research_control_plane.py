@@ -72,6 +72,10 @@ class ResearchControlPlane:
         if checkpoint.state_digest == "":
             raise ValueError("checkpoint state digest is required")
         cycle_id = f"generation-{result.generation}"
+        if result.metrics.generation != result.generation:
+            raise ValueError("research-cycle metrics generation mismatch")
+        if checkpoint.next_generation <= 0:
+            raise ValueError("checkpoint next_generation must be positive")
         with self._connection:
             self.cycle_registry.verify()
             self.checkpoint_store.verify()
@@ -112,6 +116,24 @@ class ResearchControlPlane:
         self.verify()
         return self.checkpoint_store.latest()
 
+
+    def verify_generation(
+        self,
+        generation: int,
+    ) -> ResearchControlPlaneRecord:
+        """Load and verify the exact durable cycle/checkpoint pair for a generation."""
+        if generation < 0:
+            raise ValueError("generation must be non-negative")
+        cycle_id = f"generation-{generation}"
+        cycle = self.cycle_registry.get_cycle(cycle_id)
+        if cycle is None:
+            raise ValueError("research cycle not found")
+        checkpoint = self.checkpoint_store.load(generation + 1)
+        expected_digest = json.loads(cycle.plan_json).get("checkpoint_digest")
+        if expected_digest != checkpoint.state_digest:
+            raise ValueError("durable checkpoint does not match research-cycle evidence")
+        self.verify()
+        return ResearchControlPlaneRecord(cycle=cycle, checkpoint=checkpoint)
 
     def persist_and_verify(
         self,
