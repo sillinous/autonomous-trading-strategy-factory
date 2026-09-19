@@ -394,3 +394,39 @@ def test_research_runner_store_restart_requires_checkpoint():
             run_policy=ResearchRunPolicy(max_generations=2),
             cycle_registry=registry,
         )
+
+
+def test_research_runner_uses_control_plane_for_durable_restart(tmp_path):
+    database = tmp_path / "research.db"
+    connection = sqlite3.connect(database)
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+
+    run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+        checkpoint_store=checkpoint_store,
+    )
+    connection.close()
+
+    reopened = sqlite3.connect(database)
+    reopened_registry = ResearchCycleRegistry(reopened)
+    reopened_checkpoints = ResearchCheckpointStore(reopened)
+
+    resumed = resume_research_from_store(
+        reopened_checkpoints,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=3),
+        cycle_registry=reopened_registry,
+    )
+
+    assert resumed.generations[0].generation == 2
+    assert resumed.final_checkpoint is not None
+    assert resumed.final_checkpoint.next_generation == 3
+    reopened_registry.verify()
+    reopened_checkpoints.verify()
