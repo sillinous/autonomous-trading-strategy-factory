@@ -77,3 +77,16 @@ def test_tampered_audit_chain_blocks_new_cycle() -> None:
     with pytest.raises(ValueError, match="integrity verification failed"):
         registry.save_cycle("cycle:2", 2, plan={}, feedback={}, admissions={})
     assert registry.get_cycle("cycle:2") is None
+
+
+def test_cycle_registry_rejects_mismatched_cycle_id():
+    registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
+    with pytest.raises(ValueError, match="does not match generation"):
+        registry.save_cycle("cycle:1", 0, plan={}, feedback={}, admissions={})
+
+
+def test_cycle_registry_rejects_generation_gaps():
+    registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
+    registry.save_cycle("generation-0", 0, plan={}, feedback={}, admissions={})
+    with pytest.raises(ValueError, match="generation sequence"):
+        registry.save_cycle("generation-2", 2, plan={}, feedback={}, admissions={})
