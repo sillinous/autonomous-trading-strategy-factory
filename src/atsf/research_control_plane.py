@@ -61,6 +61,10 @@ class ResearchControlPlane:
                 raise ValueError("durable research-cycle seed is invalid")
             if checkpoint.next_seed != plan["seed"] + 1:
                 raise ValueError("durable checkpoint seed does not follow research-cycle seed")
+            if checkpoint.next_generation > 1:
+                prior = self.checkpoint_store.load(checkpoint.next_generation - 1)
+                if prior is None or plan["seed"] != prior.next_seed:
+                    raise ValueError("durable research seed progression is discontinuous")
 
     def persist_generation(
         self,
@@ -80,6 +84,14 @@ class ResearchControlPlane:
         if checkpoint.next_seed != seed + 1:
             raise ValueError("checkpoint next_seed does not follow research-cycle seed")
         cycle_id = f"generation-{result.generation}"
+        prior_checkpoint = self.checkpoint_store.latest()
+        if prior_checkpoint is not None:
+            if result.generation != prior_checkpoint.next_generation:
+                raise ValueError("research generation does not follow durable checkpoint")
+            if seed != prior_checkpoint.next_seed:
+                raise ValueError("research seed does not follow durable checkpoint")
+        elif result.generation != 0:
+            raise ValueError("nonzero research generation requires a prior checkpoint")
         if result.metrics.generation != result.generation:
             raise ValueError("research-cycle metrics generation mismatch")
         if checkpoint.next_generation <= 0:
@@ -146,6 +158,10 @@ class ResearchControlPlane:
             raise ValueError("durable research-cycle seed is invalid")
         if checkpoint.next_seed != plan["seed"] + 1:
             raise ValueError("durable checkpoint seed does not follow research-cycle seed")
+        if checkpoint.next_generation > 1:
+            prior = self.checkpoint_store.load(checkpoint.next_generation - 1)
+            if prior is None or plan["seed"] != prior.next_seed:
+                raise ValueError("durable research seed progression is discontinuous")
         self.verify()
         return ResearchControlPlaneRecord(cycle=cycle, checkpoint=checkpoint)
 
