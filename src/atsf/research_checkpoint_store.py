@@ -107,8 +107,8 @@ class ResearchCheckpointStore:
             "SELECT next_generation FROM research_checkpoints "
             "ORDER BY next_generation DESC LIMIT 1"
         ).fetchone()
-        if prior is not None and checkpoint.next_generation <= prior[0]:
-            raise ValueError("research checkpoint generations must advance")
+        if prior is not None and checkpoint.next_generation != prior[0] + 1:
+            raise ValueError("research checkpoint generation sequence is invalid")
         self._connection.execute(
             "INSERT INTO research_checkpoints("
             "checkpoint_id, next_generation, cycle_id, state_digest, payload_json, schema_version"
