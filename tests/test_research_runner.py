@@ -430,3 +430,33 @@ def test_research_runner_uses_control_plane_for_durable_restart(tmp_path):
     assert resumed.final_checkpoint.next_generation == 3
     reopened_registry.verify()
     reopened_checkpoints.verify()
+
+
+def test_research_runner_requires_verified_prior_generation_before_advancement():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+    first = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+        cycle_registry=registry,
+        checkpoint_store=checkpoint_store,
+    )
+    assert first.final_checkpoint is not None
+
+    connection.execute(
+        "UPDATE research_cycles SET feedback_json = '{}' WHERE cycle_id = 'generation-0'"
+    )
+    connection.commit()
+
+    with pytest.raises(ValueError, match="integrity"):
+        resume_research_from_store(
+            checkpoint_store,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=2),
+            cycle_registry=registry,
+        )
