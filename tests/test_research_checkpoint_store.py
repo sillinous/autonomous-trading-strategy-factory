@@ -107,3 +107,15 @@ def test_checkpoint_store_rejects_unsupported_schema():
 
     with pytest.raises(ValueError, match="schema version"):
         ResearchCheckpointStore(connection)
+
+
+def test_checkpoint_store_binds_checkpoint_to_completed_cycle():
+    checkpoint = _checkpoint()
+    assert checkpoint is not None
+    connection = sqlite3.connect(":memory:")
+    store = ResearchCheckpointStore(connection)
+
+    with pytest.raises(ValueError, match="does not match completed generation"):
+        store.save(checkpoint, cycle_id="generation-99")
+
+    assert store.latest() is None
