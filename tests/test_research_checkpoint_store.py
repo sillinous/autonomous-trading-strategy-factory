@@ -90,3 +90,20 @@ def test_checkpoint_store_rejects_invalid_cycle_id_and_generation():
             ),
             cycle_id="generation-0",
         )
+
+
+def test_checkpoint_store_rejects_unsupported_schema():
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        "CREATE TABLE research_checkpoints ("
+        "checkpoint_id TEXT PRIMARY KEY, next_generation INTEGER NOT NULL UNIQUE, "
+        "cycle_id TEXT NOT NULL, state_digest TEXT NOT NULL, payload_json TEXT NOT NULL, "
+        "schema_version INTEGER NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO research_checkpoints VALUES ('bad', 1, 'generation-0', 'x', '{}', 99)"
+    )
+    connection.commit()
+
+    with pytest.raises(ValueError, match="schema version"):
+        ResearchCheckpointStore(connection)
