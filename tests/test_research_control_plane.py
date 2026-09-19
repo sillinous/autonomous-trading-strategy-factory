@@ -60,6 +60,30 @@ def test_control_plane_detects_cross_store_checkpoint_tampering():
         control.verify()
 
 
+def test_control_plane_rejects_cycle_checkpoint_generation_mismatch():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+
+    connection.execute(
+        "UPDATE research_cycles SET generation = 99 WHERE cycle_id = ?",
+        ("generation-0",),
+    )
+    connection.commit()
+
+    with pytest.raises(ValueError, match="generation mismatch"):
+        control.verify()
+
+
 def test_control_plane_requires_shared_connection():
     connection_a = sqlite3.connect(":memory:")
     connection_b = sqlite3.connect(":memory:")
