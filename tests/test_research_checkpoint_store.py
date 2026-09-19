@@ -119,3 +119,18 @@ def test_checkpoint_store_binds_checkpoint_to_completed_cycle():
         store.save(checkpoint, cycle_id="generation-99")
 
     assert store.latest() is None
+
+
+def test_checkpoint_store_rejects_generation_gaps():
+    connection = sqlite3.connect(":memory:")
+    store = ResearchCheckpointStore(connection)
+    checkpoint = _checkpoint()
+    store.save(checkpoint, cycle_id="generation-0")
+
+    payload = checkpoint.to_dict()
+    payload["next_generation"] = 3
+    payload["next_seed"] = 3
+    gapped = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
+
+    with pytest.raises(ValueError, match="generation sequence"):
+        store.save(gapped, cycle_id="generation-2")
