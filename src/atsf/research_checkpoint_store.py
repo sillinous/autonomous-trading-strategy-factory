@@ -170,8 +170,8 @@ class ResearchCheckpointStore:
             if record.checkpoint_id in seen_ids:
                 raise ValueError("duplicate research checkpoint ID")
             seen_ids.add(record.checkpoint_id)
-            if record.next_generation <= previous_generation:
-                raise ValueError("research checkpoint generation ordering is invalid")
+            if record.next_generation != previous_generation + 1:
+                raise ValueError("research checkpoint generation sequence is invalid")
             if record.checkpoint_id != f"generation-{record.next_generation}":
                 raise ValueError("research checkpoint ID does not match generation")
             if not record.cycle_id.strip():
