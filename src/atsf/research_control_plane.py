@@ -38,6 +38,26 @@ class ResearchControlPlane:
     def connection(self) -> sqlite3.Connection:
         return self._connection
 
+    def _validate_pair(self, cycle: ResearchCycleRecord, checkpoint: ResearchCheckpoint) -> None:
+        """Validate cross-store invariants for one cycle/checkpoint pair."""
+        if cycle.generation != checkpoint.next_generation - 1:
+            raise ValueError("durable cycle/checkpoint generation mismatch")
+        try:
+            plan = json.loads(cycle.plan_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("durable research-cycle plan is invalid") from exc
+        if plan.get("checkpoint_digest") != checkpoint.state_digest:
+            raise ValueError("durable checkpoint does not match research-cycle evidence")
+        seed = plan.get("seed")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise ValueError("durable research-cycle seed is invalid")
+        if checkpoint.next_seed != seed + 1:
+            raise ValueError("durable checkpoint seed does not follow research-cycle seed")
+        if checkpoint.next_generation > 1:
+            prior = self.checkpoint_store.load(checkpoint.next_generation - 1)
+            if prior is None or seed != prior.next_seed:
+                raise ValueError("durable research seed progression is discontinuous")
+
     def verify(self) -> None:
         """Verify both ledgers and their cross-store checkpoint bindings."""
         self.cycle_registry.verify()
@@ -51,20 +71,7 @@ class ResearchControlPlane:
             cycle = self.cycle_registry.get_cycle(cycle_id)
             if cycle is None:
                 raise ValueError("durable checkpoint references a missing research cycle")
-            try:
-                plan = json.loads(cycle.plan_json)
-            except json.JSONDecodeError as exc:
-                raise ValueError("durable research-cycle plan is invalid") from exc
-            if plan.get("checkpoint_digest") != checkpoint.state_digest:
-                raise ValueError("durable checkpoint does not match research-cycle evidence")
-            if not isinstance(plan.get("seed"), int) or isinstance(plan.get("seed"), bool):
-                raise ValueError("durable research-cycle seed is invalid")
-            if checkpoint.next_seed != plan["seed"] + 1:
-                raise ValueError("durable checkpoint seed does not follow research-cycle seed")
-            if checkpoint.next_generation > 1:
-                prior = self.checkpoint_store.load(checkpoint.next_generation - 1)
-                if prior is None or plan["seed"] != prior.next_seed:
-                    raise ValueError("durable research seed progression is discontinuous")
+            self._validate_pair(cycle, checkpoint)
 
     def persist_generation(
         self,
@@ -148,20 +155,7 @@ class ResearchControlPlane:
         if cycle is None:
             raise ValueError("research cycle not found")
         checkpoint = self.checkpoint_store.load(generation + 1)
-        try:
-            plan = json.loads(cycle.plan_json)
-        except json.JSONDecodeError as exc:
-            raise ValueError("durable research-cycle plan is invalid") from exc
-        if plan.get("checkpoint_digest") != checkpoint.state_digest:
-            raise ValueError("durable checkpoint does not match research-cycle evidence")
-        if not isinstance(plan.get("seed"), int) or isinstance(plan.get("seed"), bool):
-            raise ValueError("durable research-cycle seed is invalid")
-        if checkpoint.next_seed != plan["seed"] + 1:
-            raise ValueError("durable checkpoint seed does not follow research-cycle seed")
-        if checkpoint.next_generation > 1:
-            prior = self.checkpoint_store.load(checkpoint.next_generation - 1)
-            if prior is None or plan["seed"] != prior.next_seed:
-                raise ValueError("durable research seed progression is discontinuous")
+        self._validate_pair(cycle, checkpoint)
         self.verify()
         return ResearchControlPlaneRecord(cycle=cycle, checkpoint=checkpoint)
 
