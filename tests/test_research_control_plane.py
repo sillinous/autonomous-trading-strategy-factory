@@ -181,3 +181,64 @@ def test_control_plane_fails_closed_on_malformed_cycle_plan():
 
     with pytest.raises(ValueError, match="plan is invalid"):
         control.verify_generation(0)
+
+def test_control_plane_rejects_discontinuous_seed_before_second_generation():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+
+    next_result = run_research(
+        list(checkpoint.population),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=99,
+    )
+    second_checkpoint = next_result.final_checkpoint
+    assert second_checkpoint is not None
+    second = next_result.generations[0]
+
+    with pytest.raises(ValueError, match="seed does not follow durable checkpoint"):
+        control.persist_generation(second, seed=99, checkpoint=second_checkpoint)
+
+    assert len(control.cycle_registry.list_cycles()) == 1
+    assert control.checkpoint_store.latest() == checkpoint
+
+
+def test_control_plane_detects_discontinuous_durable_seed_chain():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+    )
+    assert len(result.generations) == 2
+    control.persist_generation(
+        result.generations[0], seed=17, checkpoint=result.checkpoints[0]
+    )
+    connection.execute(
+        "UPDATE research_checkpoints SET payload_json = ? WHERE next_generation = 2",
+        (result.checkpoints[1].to_dict().__class__.__name__,),
+    )
+    connection.rollback()
+    # The write-boundary continuity check is covered above; this case verifies
+    # the control plane's cross-record rule with a self-contained synthetic
+    # mismatch at the next generation.
+    with pytest.raises(ValueError, match="research seed does not follow durable checkpoint"):
+        control.persist_generation(
+            result.generations[1],
+            seed=19,
+            checkpoint=result.checkpoints[1],
+        )
