@@ -8,7 +8,7 @@ from atsf.research_checkpoint import ResearchCheckpoint
 from atsf.research_cycle import ResearchCyclePolicy
 from atsf.research_cycle_registry import ResearchCycleRegistry
 from atsf.research_checkpoint_store import ResearchCheckpointStore
-from atsf.research_runner import ResearchRunPolicy, resume_research, run_research
+from atsf.research_runner import ResearchRunPolicy, resume_research, resume_research_from_store, run_research
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
 
@@ -332,4 +332,65 @@ def test_research_runner_resume_rejects_durable_checkpoint_mismatch():
             run_policy=ResearchRunPolicy(max_generations=2),
             cycle_registry=registry,
             checkpoint_store=checkpoint_store,
+        )
+
+
+def test_research_runner_can_resume_directly_from_durable_store():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+    first = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=2),
+        seed=17,
+        cycle_registry=registry,
+        checkpoint_store=checkpoint_store,
+    )
+
+    resumed = resume_research_from_store(
+        checkpoint_store,
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=4),
+        cycle_registry=registry,
+    )
+
+    assert resumed.generations[0].generation == 2
+    assert resumed.generations[-1].generation == 3
+    assert resumed.final_checkpoint is not None
+    assert resumed.final_checkpoint.next_generation == 4
+    assert checkpoint_store.latest() == resumed.final_checkpoint
+    assert first.final_checkpoint is not None
+
+
+def test_research_runner_store_restart_requires_shared_connection():
+    connection_a = sqlite3.connect(":memory:")
+    connection_b = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection_a)
+    checkpoint_store = ResearchCheckpointStore(connection_b)
+
+    with pytest.raises(ValueError, match="share a connection"):
+        resume_research_from_store(
+            checkpoint_store,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=2),
+            cycle_registry=registry,
+        )
+
+
+def test_research_runner_store_restart_requires_checkpoint():
+    connection = sqlite3.connect(":memory:")
+    registry = ResearchCycleRegistry(connection)
+    checkpoint_store = ResearchCheckpointStore(connection)
+
+    with pytest.raises(ValueError, match="no durable research checkpoint"):
+        resume_research_from_store(
+            checkpoint_store,
+            fake_evaluation,
+            cycle_policy=cycle_policy(),
+            run_policy=ResearchRunPolicy(max_generations=2),
+            cycle_registry=registry,
         )
