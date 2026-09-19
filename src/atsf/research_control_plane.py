@@ -111,3 +111,18 @@ class ResearchControlPlane:
     def latest_checkpoint(self) -> ResearchCheckpoint | None:
         self.verify()
         return self.checkpoint_store.latest()
+
+
+    def persist_and_verify(
+        self,
+        result: ResearchCycleResult,
+        *,
+        seed: int,
+        checkpoint: ResearchCheckpoint,
+    ) -> ResearchControlPlaneRecord:
+        """Persist one generation and immediately verify the complete durable state."""
+        return self.persist_generation(
+            result,
+            seed=seed,
+            checkpoint=checkpoint,
+        )
