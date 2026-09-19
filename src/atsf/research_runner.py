@@ -213,6 +213,34 @@ def run_research(
         checkpoint_store=checkpoint_store,
     )
 
+def resume_research_from_store(
+    checkpoint_store: ResearchCheckpointStore,
+    evaluator: CandidateEvaluator,
+    *,
+    cycle_policy: ResearchCyclePolicy,
+    run_policy: ResearchRunPolicy | None = None,
+    adaptive_policy: AdaptiveEvolutionPolicy | None = None,
+    cycle_registry: ResearchCycleRegistry,
+) -> ResearchRunResult:
+    """Resume from the latest durable checkpoint after cross-store verification."""
+    if checkpoint_store.connection is not cycle_registry.connection:
+        raise ValueError("checkpoint_store and cycle_registry must share a connection")
+    checkpoint_store.verify()
+    cycle_registry.verify()
+    checkpoint = checkpoint_store.latest()
+    if checkpoint is None:
+        raise ValueError("no durable research checkpoint is available")
+    _verify_checkpoint_binding(cycle_registry, checkpoint)
+    return resume_research(
+        checkpoint,
+        evaluator,
+        cycle_policy=cycle_policy,
+        run_policy=run_policy,
+        adaptive_policy=adaptive_policy,
+        cycle_registry=cycle_registry,
+        checkpoint_store=checkpoint_store,
+    )
+
 
 def resume_research(
     checkpoint: ResearchCheckpoint,
