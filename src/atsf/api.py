@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime
 
 import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .certificate_integrity import verify_persisted_certificate
@@ -85,6 +87,13 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
 
     def get_store() -> ExperimentRegistry:
         return store
+
+    @app.get("/", include_in_schema=False)
+    def operator_ui() -> FileResponse:
+        ui_path = Path(__file__).resolve().parents[2] / "ui" / "index.html"
+        if not ui_path.is_file():
+            raise HTTPException(status_code=404, detail="operator UI is not installed")
+        return FileResponse(ui_path, media_type="text/html")
 
     def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         configured_key = os.getenv("ATSF_API_KEY")
