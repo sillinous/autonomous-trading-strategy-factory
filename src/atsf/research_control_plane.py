@@ -143,6 +143,10 @@ class ResearchControlPlane:
         self.verify()
         return self.checkpoint_store.latest()
 
+    def verify_pair(self, generation: int) -> ResearchControlPlaneRecord:
+        """Verify and return one durable generation pair."""
+        return self.verify_generation(generation)
+
     def verify_generation(
         self,
         generation: int,
