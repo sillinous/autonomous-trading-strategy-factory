@@ -84,6 +84,30 @@ def test_control_plane_rejects_cycle_checkpoint_generation_mismatch():
         control.verify()
 
 
+def test_control_plane_rejects_missing_checkpoint_for_existing_cycle():
+    connection = sqlite3.connect(":memory:")
+    control = ResearchControlPlane(connection)
+    result = run_research(
+        make_parent_population(),
+        fake_evaluation,
+        cycle_policy=cycle_policy(),
+        run_policy=ResearchRunPolicy(max_generations=1),
+        seed=17,
+    )
+    checkpoint = result.final_checkpoint
+    assert checkpoint is not None
+    control.persist_generation(result.generations[0], seed=17, checkpoint=checkpoint)
+
+    connection.execute(
+        "DELETE FROM research_checkpoints WHERE next_generation = ?",
+        (checkpoint.next_generation,),
+    )
+    connection.commit()
+
+    with pytest.raises(ValueError, match="checkpoint not found"):
+        control.verify_generation(0)
+
+
 def test_control_plane_requires_shared_connection():
     connection_a = sqlite3.connect(":memory:")
     connection_b = sqlite3.connect(":memory:")
