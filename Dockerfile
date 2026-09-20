@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY ui ./ui
 
 RUN pip install --no-cache-dir . "uvicorn[standard]>=0.30" \
     && useradd --create-home --uid 10001 atsf \
