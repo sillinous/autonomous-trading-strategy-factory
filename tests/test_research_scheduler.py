@@ -127,3 +127,36 @@ def test_scheduler_pauses_on_critical_health():
 def test_scheduler_policy_validates_minimum_depth():
     with pytest.raises(ValueError, match="min_generations_before_review"):
         ResearchSchedulePolicy(min_generations_before_review=0)
+
+
+def test_scheduler_fingerprint_is_deterministic_and_bound():
+    history, result = make_state()
+    first = schedule_research(history, result)
+    second = schedule_research(history, result)
+
+    assert first.fingerprint
+    assert first.fingerprint == second.fingerprint
+
+    with pytest.raises(ValueError, match="fingerprint mismatch"):
+        type(first)(
+            action=first.action,
+            health=first.health,
+            generation=first.generation,
+            execution_authority=False,
+            reasons=first.reasons,
+            fingerprint="tampered",
+        )
+
+
+def test_scheduler_rejects_execution_authority():
+    history, result = make_state()
+    schedule = schedule_research(history, result)
+
+    with pytest.raises(ValueError, match="cannot grant execution authority"):
+        type(schedule)(
+            action=schedule.action,
+            health=schedule.health,
+            generation=schedule.generation,
+            execution_authority=True,
+            reasons=schedule.reasons,
+        )
