@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from enum import Enum
 
@@ -42,6 +44,38 @@ class ResearchSchedule:
     generation: int
     execution_authority: bool
     reasons: tuple[str, ...]
+    fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        if self.generation < 0:
+            raise ValueError("generation must be non-negative")
+        if self.execution_authority:
+            raise ValueError("research schedule cannot grant execution authority")
+        payload = {
+            "action": self.action.value,
+            "generation": self.generation,
+            "health": {
+                "status": self.health.status.value,
+                "decision": self.health.decision.value,
+                "diversity_collapsed": self.health.diversity_collapsed,
+                "novelty_exhausted": self.health.novelty_exhausted,
+                "stagnating": self.health.stagnating,
+                "promotion_eligibility_collapsed": self.health.promotion_eligibility_collapsed,
+                "exploration_saturated": self.health.exploration_saturated,
+                "unique_strategy_ratio": self.health.unique_strategy_ratio,
+                "novel_strategy_ratio": self.health.novel_strategy_ratio,
+                "promotion_eligible_ratio": self.health.promotion_eligible_ratio,
+                "mean_genome_distance": self.health.mean_genome_distance,
+                "reasons": self.health.reasons,
+            },
+            "reasons": self.reasons,
+            "execution_authority": False,
+        }
+        canonical = json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":"))
+        expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if self.fingerprint and self.fingerprint != expected:
+            raise ValueError("research schedule fingerprint mismatch")
+        object.__setattr__(self, "fingerprint", expected)
 
 
 def schedule_research(
