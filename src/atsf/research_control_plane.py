@@ -148,6 +148,8 @@ class ResearchControlPlane:
         generation: int,
     ) -> ResearchControlPlaneRecord:
         """Load and verify the exact durable cycle/checkpoint pair for a generation."""
+        if not isinstance(generation, int) or isinstance(generation, bool):
+            raise ValueError("generation must be an integer")
         if generation < 0:
             raise ValueError("generation must be non-negative")
         cycle_id = f"generation-{generation}"
@@ -155,6 +157,8 @@ class ResearchControlPlane:
         if cycle is None:
             raise ValueError("research cycle not found")
         checkpoint = self.checkpoint_store.load(generation + 1)
+        if checkpoint is None:
+            raise ValueError("research checkpoint not found")
         self._validate_pair(cycle, checkpoint)
         self.verify()
         return ResearchControlPlaneRecord(cycle=cycle, checkpoint=checkpoint)
