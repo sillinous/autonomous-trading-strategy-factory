@@ -83,6 +83,16 @@ def bars(count: int = 4) -> list[dict]:
     ]
 
 
+def test_operator_ui_is_served_from_root(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "ATSF Control Plane" in response.text
+    registry.close()
+
+
 def test_health_and_capabilities_are_paper_only(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
