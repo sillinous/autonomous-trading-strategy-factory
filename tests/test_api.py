@@ -309,3 +309,15 @@ def test_portfolio_lifecycle_endpoint_fails_closed_when_no_lifecycle_record(monk
     assert response.status_code == 404
     assert response.json()["detail"] == "portfolio lifecycle not found"
     registry.close()
+
+
+def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    html = client.get("/").text
+    assert html.count('id="portfolioId"') == 1
+    assert html.count('id="strategyId"') == 1
+    assert 'id="researchIntegrity"' in html
+    assert 'id="portfolioHealth"' in html
+    registry.close()
