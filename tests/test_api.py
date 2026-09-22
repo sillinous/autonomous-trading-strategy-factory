@@ -320,4 +320,5 @@ def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     assert html.count('id="strategyId"') == 1
     assert 'id="researchIntegrity"' in html
     assert 'id="portfolioHealth"' in html
+    assert 'id="portfolioLifecycle"' in html
     registry.close()
