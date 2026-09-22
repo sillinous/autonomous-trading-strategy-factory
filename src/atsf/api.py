@@ -24,6 +24,7 @@ from .provenance_graph import build_research_provenance_graph
 from .registry import ExperimentRegistry
 from .research import run_research
 from .research_control_plane import ResearchControlPlane
+from .portfolio_lifecycle_store import PortfolioLifecycleStore
 from .reproducibility import build_reproducibility_certificate
 from .strategy import StrategySpec
 
@@ -111,6 +112,35 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.get("/capabilities", dependencies=[Auth])
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
+
+    @app.get("/portfolios/{portfolio_id}/lifecycle", dependencies=[Auth])
+    def portfolio_lifecycle(portfolio_id: str, store: ExperimentRegistry = Store) -> dict:
+        if not portfolio_id.strip():
+            raise HTTPException(status_code=400, detail="portfolio_id cannot be empty")
+        lifecycle = PortfolioLifecycleStore(store._connection)
+        try:
+            lifecycle.verify(portfolio_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        record = lifecycle.latest(portfolio_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="portfolio lifecycle not found")
+        return {
+            "portfolio_id": record.portfolio_id,
+            "generation": record.generation,
+            "strategy_ids": record.strategy_ids,
+            "weights": dict(record.weights),
+            "health_status": record.health_status,
+            "decision": record.decision,
+            "total_return": record.total_return,
+            "volatility": record.volatility,
+            "max_risk_fraction": record.max_risk_fraction,
+            "breached_limits": record.breached_limits,
+            "replace_strategy_ids": record.replace_strategy_ids,
+            "fingerprint": record.fingerprint,
+            "integrity_verified": True,
+            "execution_authority": False,
+        }
 
     @app.get("/research/control-plane", dependencies=[Auth])
     def research_control_plane(store: ExperimentRegistry = Store) -> dict:
