@@ -23,6 +23,7 @@ from .portfolio_replay import verify_persisted_portfolio_run
 from .provenance_graph import build_research_provenance_graph
 from .registry import ExperimentRegistry
 from .research import run_research
+from .research_control_plane import ResearchControlPlane
 from .reproducibility import build_reproducibility_certificate
 from .strategy import StrategySpec
 
@@ -110,6 +111,37 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.get("/capabilities", dependencies=[Auth])
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
+
+    @app.get("/research/control-plane", dependencies=[Auth])
+    def research_control_plane(store: ExperimentRegistry = Store) -> dict:
+        """Expose verified durable research state without granting execution authority."""
+        control = ResearchControlPlane(store._connection)
+        try:
+            control.verify()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        cycles = control.cycle_registry.list_cycles()
+        checkpoint = control.latest_checkpoint()
+        if not cycles:
+            return {
+                "status": "EMPTY",
+                "generation_count": 0,
+                "latest_generation": None,
+                "latest_checkpoint_generation": None,
+                "integrity_verified": True,
+                "execution_authority": False,
+            }
+        latest = cycles[-1]
+        return {
+            "status": "VERIFIED",
+            "generation_count": len(cycles),
+            "latest_generation": latest.generation,
+            "latest_checkpoint_generation": None if checkpoint is None else checkpoint.next_generation,
+            "latest_cycle_id": latest.cycle_id,
+            "checkpoint_digest": None if checkpoint is None else checkpoint.state_digest,
+            "integrity_verified": True,
+            "execution_authority": False,
+        }
 
     @app.get("/dashboard/summary", dependencies=[Auth])
     def dashboard_summary(store: ExperimentRegistry = Store) -> dict:
