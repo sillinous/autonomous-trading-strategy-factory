@@ -111,6 +111,29 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
 
+    @app.get("/dashboard/summary", dependencies=[Auth])
+    def dashboard_summary(store: ExperimentRegistry = Store) -> dict:
+        """Read-only operator snapshot assembled from persisted registry evidence."""
+        experiments = store.list_experiments()
+        ranked = store.rank_experiments()
+        return {
+            "service": {"status": "ok", "live_execution_enabled": False},
+            "research": {
+                "experiment_count": len(experiments),
+                "ranked_experiment_count": len(ranked),
+                "promotion_eligible_count": sum(
+                    1 for item in experiments
+                    if isinstance(item.get("evaluation", {}).get("promotion"), dict)
+                    and str(item["evaluation"]["promotion"].get("stage", "")).lower() == StrategyLifecycleStage.PROMOTED.value
+                ),
+            },
+            "safety": {
+                "execution_authority": False,
+                "live_execution_enabled": False,
+                "operator_actions_are_audited": True,
+            },
+        }
+
     @app.get("/portfolios/{portfolio_id}", dependencies=[Auth])
     def portfolio(portfolio_id: str, store: ExperimentRegistry = Store) -> dict:
         result = store.get_portfolio(portfolio_id)
