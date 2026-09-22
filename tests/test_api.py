@@ -323,3 +323,27 @@ def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     assert 'id="portfolioLifecycle"' in html
     assert 'id="lifecycleHistory"' in html
     registry.close()
+
+
+def test_authenticated_health_details_reports_registry_and_safety(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    response = client.get("/health/details")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "registry": "ok",
+        "execution_authority": False,
+        "live_execution_enabled": False,
+    }
+    registry.close()
+
+
+def test_authenticated_health_details_requires_api_key_when_configured(monkeypatch):
+    monkeypatch.setenv("ATSF_API_KEY", "test-secret")
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    assert client.get("/health/details").status_code == 401
+    assert client.get("/health/details", headers={"X-API-Key": "test-secret"}).status_code == 200
+    registry.close()
