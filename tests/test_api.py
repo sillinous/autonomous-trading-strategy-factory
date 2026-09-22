@@ -278,3 +278,34 @@ def test_paper_run_endpoint_rejects_invalid_market_data_with_bad_request(monkeyp
     )
     assert response.status_code == 400
     registry.close()
+
+
+def test_operator_dashboard_summary_and_research_integrity_endpoints(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    seed(registry)
+    client = TestClient(create_app(registry))
+
+    summary = client.get("/dashboard/summary")
+    assert summary.status_code == 200
+    payload = summary.json()
+    assert payload["service"]["live_execution_enabled"] is False
+    assert payload["safety"]["execution_authority"] is False
+    assert payload["research"]["experiment_count"] >= 1
+
+    control = client.get("/research/control-plane")
+    assert control.status_code == 200
+    assert control.json()["integrity_verified"] is True
+    assert control.json()["execution_authority"] is False
+    registry.close()
+
+
+def test_portfolio_lifecycle_endpoint_fails_closed_when_no_lifecycle_record(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    seed(registry)
+    client = TestClient(create_app(registry))
+    response = client.get("/portfolios/portfolio-1/lifecycle")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "portfolio lifecycle not found"
+    registry.close()
