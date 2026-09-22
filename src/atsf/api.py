@@ -109,7 +109,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/health", dependencies=[Auth])
+    @app.get("/health/details", dependencies=[Auth])
     def health_authenticated(store: ExperimentRegistry = Store) -> dict:
         """Authenticated operational health snapshot; never grants execution authority."""
         try:
