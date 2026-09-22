@@ -109,6 +109,15 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/health", dependencies=[Auth])
+    def health_authenticated(store: ExperimentRegistry = Store) -> dict:
+        """Authenticated operational health snapshot; never grants execution authority."""
+        try:
+            store.list_experiments()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"registry unavailable: {exc}") from exc
+        return {"status": "ok", "registry": "ok", "execution_authority": False, "live_execution_enabled": False}
+
     @app.get("/capabilities", dependencies=[Auth])
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
