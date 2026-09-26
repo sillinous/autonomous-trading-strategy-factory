@@ -122,6 +122,9 @@ class ResearchCycleRegistry:
             if tuple(existing) != expected:
                 raise ValueError("research cycle is immutable")
             return record
+        previous_row = self._connection.execute(
+            "SELECT payload_digest FROM research_cycle_audit ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
         self._connection.execute(
             "INSERT INTO research_cycles(cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json) VALUES (?, ?, ?, ?, ?, ?)",
             (cycle_id, generation, plan_json, feedback_json, admissions_json, portfolio_feedback_json),
