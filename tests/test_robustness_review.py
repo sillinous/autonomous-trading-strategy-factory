@@ -1,3 +1,4 @@
+import pytest
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -236,15 +237,11 @@ def test_robustness_review_rejects_scheduler_execution_authority():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
     provenance = make_provenance(candidate, evaluation)
-    schedule = ResearchSchedule(
-        action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW,
-        health=SimpleNamespace(),
-        generation=1,
-        execution_authority=True,
-        reasons=(),
-    )
-
-    review = review_robustness(candidate, evaluation, schedule, provenance)
-
-    assert review.decision is RobustnessReviewDecision.REJECT
-    assert any("execution authority" in reason for reason in review.reasons)
+    with pytest.raises(ValueError, match="execution authority"):
+        ResearchSchedule(
+            action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW,
+            health=make_schedule().health,
+            generation=1,
+            execution_authority=True,
+            reasons=(),
+        )
