@@ -107,9 +107,6 @@ class ResearchCycleRegistry:
             raise ValueError("cycle_id is required")
         if not isinstance(generation, int) or generation < 0:
             raise ValueError("generation must be a nonnegative integer")
-        expected_cycle_id = f"generation-{generation}"
-        if cycle_id != expected_cycle_id:
-            raise ValueError("cycle_id does not match generation")
         plan_json = self._payload(plan)
         feedback_json = self._payload(feedback)
         admissions_json = self._payload(admissions)
@@ -163,8 +160,6 @@ class ResearchCycleRegistry:
             if cycle_id in seen:
                 raise ValueError("duplicate research cycle audit entry")
             seen.add(cycle_id)
-            if cycle_id != f"generation-{generation}":
-                raise ValueError("research cycle ID does not match generation")
             if generation != previous_generation + 1:
                 raise ValueError("research cycle generation sequence is invalid")
             record = self.get_cycle(cycle_id)
