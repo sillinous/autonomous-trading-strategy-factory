@@ -9,13 +9,13 @@ from tests.test_population import make_parent_population
 from tests.test_research_runner import cycle_policy, fake_evaluation
 
 
-def _checkpoint():
+def _checkpoint(seed=17):
     result = run_research(
         make_parent_population(),
         fake_evaluation,
         cycle_policy=cycle_policy(),
         run_policy=ResearchRunPolicy(max_generations=1),
-        seed=17,
+        seed=seed,
     )
     return result.final_checkpoint
 
