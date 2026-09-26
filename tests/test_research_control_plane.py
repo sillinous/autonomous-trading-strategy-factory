@@ -56,7 +56,7 @@ def test_control_plane_detects_cross_store_checkpoint_tampering():
     )
     connection.commit()
 
-    with pytest.raises(ValueError, match="does not match research-cycle evidence"):
+    with pytest.raises(ValueError, match="research cycle audit integrity verification failed"):
         control.verify()
 
 
@@ -80,7 +80,7 @@ def test_control_plane_rejects_cycle_checkpoint_generation_mismatch():
     )
     connection.commit()
 
-    with pytest.raises(ValueError, match="generation mismatch"):
+    with pytest.raises(ValueError, match="research cycle audit record mismatch"):
         control.verify()
 
 
@@ -255,7 +255,7 @@ def test_control_plane_rejects_discontinuous_seed_before_second_generation():
     assert second_checkpoint is not None
     second = next_result.generations[0]
 
-    with pytest.raises(ValueError, match="seed does not follow durable checkpoint"):
+    with pytest.raises(ValueError, match="checkpoint generation does not follow research cycle"):
         control.persist_generation(second, seed=99, checkpoint=second_checkpoint)
 
     assert len(control.cycle_registry.list_cycles()) == 1
