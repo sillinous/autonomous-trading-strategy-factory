@@ -288,7 +288,7 @@ def test_control_plane_rejects_discontinuous_seed_during_durable_resume():
     second_checkpoint = next_result.final_checkpoint
     assert second_checkpoint is not None
 
-    with pytest.raises(ValueError, match="seed does not follow durable checkpoint"):
+    with pytest.raises(ValueError, match="checkpoint generation does not follow research cycle"):
         control.persist_generation(second, seed=19, checkpoint=second_checkpoint)
 
     assert len(control.cycle_registry.list_cycles()) == 1
