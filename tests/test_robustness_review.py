@@ -7,6 +7,7 @@ from atsf.genome import StrategyGenome
 from atsf.lineage import LineageRecord
 from atsf.population import Candidate
 from atsf.research_provenance import CandidateProvenance, _candidate_record
+from atsf.research_health import ResearchHealth, ResearchHealthDecision, ResearchHealthStatus
 from atsf.research_scheduler import ResearchSchedule, ResearchScheduleAction
 from atsf.robustness import RobustnessResult
 from atsf.robustness_review import (
@@ -73,9 +74,23 @@ def with_field(evaluation, field, value):
 
 
 def make_schedule(generation=1, action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW):
+    health = ResearchHealth(
+        status=ResearchHealthStatus.HEALTHY,
+        decision=ResearchHealthDecision.CONTINUE,
+        diversity_collapsed=False,
+        novelty_exhausted=False,
+        stagnating=False,
+        promotion_eligibility_collapsed=False,
+        exploration_saturated=False,
+        unique_strategy_ratio=1.0,
+        novel_strategy_ratio=1.0,
+        promotion_eligible_ratio=1.0,
+        mean_genome_distance=1.0,
+        reasons=(),
+    )
     return ResearchSchedule(
         action=action,
-        health=SimpleNamespace(),
+        health=health,
         generation=generation,
         execution_authority=False,
         reasons=(),
