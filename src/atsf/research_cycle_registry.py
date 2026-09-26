@@ -131,7 +131,7 @@ class ResearchCycleRegistry:
         )
         self._connection.execute(
             "INSERT INTO research_cycle_audit(cycle_id, generation, payload_digest, previous_digest) VALUES (?, ?, ?, ?)",
-            (cycle_id, generation, self._digest(record), "" if previous_row is None else previous_row[1]),
+            (cycle_id, generation, self._digest(record), "" if previous_row is None else previous_row[0]),
         )
         return record
 
