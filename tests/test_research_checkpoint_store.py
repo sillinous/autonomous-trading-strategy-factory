@@ -79,7 +79,7 @@ def test_checkpoint_store_rejects_invalid_cycle_id_and_generation():
     store = ResearchCheckpointStore(connection)
     with pytest.raises(ValueError, match="cycle_id"):
         store.save(checkpoint, cycle_id="")
-    with pytest.raises(ValueError, match="durable checkpoint"):
+    with pytest.raises(ValueError, match="next_generation must follow the latest history generation"):
         ResearchCheckpointStore(connection).save(
             ResearchCheckpoint(
                 next_generation=0,
@@ -132,7 +132,7 @@ def test_checkpoint_store_rejects_generation_gaps():
     payload["next_seed"] = 3
     gapped = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
 
-    with pytest.raises(ValueError, match="generation sequence"):
+    with pytest.raises(ValueError, match="next_generation must follow the latest history generation"):
         store.save(gapped, cycle_id="generation-2")
 
 
