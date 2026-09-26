@@ -67,8 +67,7 @@ class ResearchControlPlane:
         ).fetchall()
         for (next_generation,) in checkpoints:
             checkpoint = self.checkpoint_store.load(int(next_generation))
-            cycle_id = f"generation-{checkpoint.next_generation - 1}"
-            cycle = self.cycle_registry.get_cycle(cycle_id)
+            cycle = self.cycle_registry.get_cycle(self.checkpoint_store.get(int(next_generation)).cycle_id)
             if cycle is None:
                 raise ValueError("durable checkpoint references a missing research cycle")
             self._validate_pair(cycle, checkpoint)
@@ -156,8 +155,11 @@ class ResearchControlPlane:
             raise ValueError("generation must be an integer")
         if generation < 0:
             raise ValueError("generation must be non-negative")
-        cycle_id = f"generation-{generation}"
-        cycle = self.cycle_registry.get_cycle(cycle_id)
+        cycle = None
+        for candidate in self.cycle_registry.list_cycles():
+            if candidate.generation == generation:
+                cycle = candidate
+                break
         if cycle is None:
             raise ValueError("research cycle not found")
         checkpoint = self.checkpoint_store.load(generation + 1)
