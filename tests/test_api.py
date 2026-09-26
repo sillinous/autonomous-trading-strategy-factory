@@ -193,7 +193,7 @@ def test_portfolio_lifecycle_endpoint_exposes_persisted_integrity_checked_record
     assert payload["portfolio_id"] == "portfolio-1"
     assert payload["generation"] == 0
     assert payload["strategy_ids"] == [strategy_id]
-    assert payload["weights"] == [[strategy_id, 1.0]]
+    assert payload["weights"] == {strategy_id: 1.0}
     assert payload["integrity_verified"] is True
     assert payload["execution_authority"] is False
     assert payload["fingerprint"] == record.fingerprint
