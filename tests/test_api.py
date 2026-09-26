@@ -7,7 +7,9 @@ from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.feedback_loop import process_strategy_health
 from atsf.feedback_provenance import build_feedback_provenance
 from atsf.feedback_registry import FeedbackEventStore
-from atsf.lifecycle import StrategyLifecycle
+from atsf.lifecycle import StrategyLifecycle, StrategyLifecycleStage
+from atsf.lifecycle_store import LifecycleStore
+from atsf.portfolio_lifecycle_store import PortfolioLifecycleStore
 from atsf.lineage import LineageRecord
 from atsf.monitoring import DegradationReport
 from atsf.registry import ExperimentRegistry
@@ -135,6 +137,66 @@ def test_research_run_endpoint_persists_research_artifacts(monkeypatch):
     assert len(payload["dataset_version"]) == 16
     assert payload["generations"] == 1
     assert payload["final_population_size"] == 1
+    registry.close()
+
+
+def test_strategy_lifecycle_history_endpoint_exposes_integrity_checked_events(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    lifecycle = LifecycleStore(registry._connection)
+    lifecycle.save(strategy_id, StrategyLifecycleStage.RESEARCH, reason="research candidate")
+    lifecycle.transition(
+        strategy_id,
+        StrategyLifecycleStage.RESEARCH,
+        StrategyLifecycleStage.VALIDATED,
+        reason="validation passed",
+    )
+
+    client = TestClient(create_app(registry))
+    response = client.get(f"/strategies/{strategy_id}/lifecycle/history")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_count"] == 2
+    assert payload["events"][0]["source_stage"] is None
+    assert payload["events"][0]["target_stage"] == "research"
+    assert payload["events"][1]["source_stage"] == "research"
+    assert payload["events"][1]["target_stage"] == "validated"
+    assert all(len(event["integrity_hash"]) == 64 for event in payload["events"])
+    registry.close()
+
+
+def test_portfolio_lifecycle_endpoint_exposes_persisted_integrity_checked_record(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    strategy_id = seed(registry)
+    lifecycle = PortfolioLifecycleStore(registry._connection)
+    record = lifecycle.new_record(
+        portfolio_id="portfolio-1",
+        generation=0,
+        strategy_ids=(strategy_id,),
+        weights={strategy_id: 1.0},
+        health_status="healthy",
+        decision="continue_portfolio",
+        total_return=0.05,
+        volatility=0.02,
+        max_risk_fraction=0.1,
+        breached_limits=(),
+        replace_strategy_ids=(),
+    )
+    lifecycle.append(record)
+
+    client = TestClient(create_app(registry))
+    response = client.get("/portfolios/portfolio-1/lifecycle")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["portfolio_id"] == "portfolio-1"
+    assert payload["generation"] == 0
+    assert payload["strategy_ids"] == [strategy_id]
+    assert payload["weights"] == [[strategy_id, 1.0]]
+    assert payload["integrity_verified"] is True
+    assert payload["execution_authority"] is False
+    assert payload["fingerprint"] == record.fingerprint
     registry.close()
 
 
