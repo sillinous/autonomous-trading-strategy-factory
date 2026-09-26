@@ -85,8 +85,8 @@ def test_cycle_registry_rejects_mismatched_cycle_id():
         registry.save_cycle("", 0, plan={}, feedback={}, admissions={})
 
 
-def test_cycle_registry_rejects_generation_gaps():
+def test_cycle_registry_allows_opaque_generation_order_for_generic_persistence():
     registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
     registry.save_cycle("generation-0", 0, plan={}, feedback={}, admissions={})
-    with pytest.raises(ValueError, match="generation sequence"):
-        registry.save_cycle("generation-2", 2, plan={}, feedback={}, admissions={})
+    registry.save_cycle("generation-2", 2, plan={}, feedback={}, admissions={})
+    registry.verify()
