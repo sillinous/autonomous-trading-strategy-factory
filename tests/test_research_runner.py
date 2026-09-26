@@ -324,7 +324,7 @@ def test_research_runner_resume_rejects_durable_checkpoint_mismatch():
     payload["next_seed"] += 1
     tampered = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
 
-    with pytest.raises(ValueError, match="does not match durable checkpoint store"):
+    with pytest.raises(ValueError, match="checkpoint does not match durable research-cycle evidence"):
         resume_research(
             tampered,
             fake_evaluation,
