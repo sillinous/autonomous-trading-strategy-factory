@@ -236,7 +236,6 @@ def test_review_rejects_invalid_provenance_seed():
 def test_robustness_review_rejects_scheduler_execution_authority():
     candidate = make_candidate()
     evaluation = make_evaluation(candidate)
-    provenance = make_provenance(candidate, evaluation)
     with pytest.raises(ValueError, match="execution authority"):
         ResearchSchedule(
             action=ResearchScheduleAction.READY_FOR_ROBUSTNESS_REVIEW,
