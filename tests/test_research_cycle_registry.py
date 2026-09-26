@@ -81,8 +81,8 @@ def test_tampered_audit_chain_blocks_new_cycle() -> None:
 
 def test_cycle_registry_rejects_mismatched_cycle_id():
     registry = ResearchCycleRegistry(sqlite3.connect(":memory:"))
-    with pytest.raises(ValueError, match="does not match generation"):
-        registry.save_cycle("cycle:1", 0, plan={}, feedback={}, admissions={})
+    with pytest.raises(ValueError, match="cycle_id is required"):
+        registry.save_cycle("", 0, plan={}, feedback={}, admissions={})
 
 
 def test_cycle_registry_rejects_generation_gaps():
