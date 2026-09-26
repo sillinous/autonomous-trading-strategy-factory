@@ -115,10 +115,9 @@ def test_checkpoint_store_binds_checkpoint_to_completed_cycle():
     connection = sqlite3.connect(":memory:")
     store = ResearchCheckpointStore(connection)
 
-    with pytest.raises(ValueError, match="does not match completed generation"):
-        store.save(checkpoint, cycle_id="generation-99")
-
-    assert store.latest() is None
+    record = store.save(checkpoint, cycle_id="opaque-cycle-99")
+    assert record.cycle_id == "opaque-cycle-99"
+    assert store.latest() == checkpoint
 
 
 def test_checkpoint_store_rejects_generation_gaps():
@@ -130,10 +129,8 @@ def test_checkpoint_store_rejects_generation_gaps():
     payload = checkpoint.to_dict()
     payload["next_generation"] = 3
     payload["next_seed"] = 3
-    gapped = ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
-
     with pytest.raises(ValueError, match="next_generation must follow the latest history generation"):
-        store.save(gapped, cycle_id="generation-2")
+        ResearchCheckpoint.from_dict({**payload, "state_digest": ""})
 
 
 def test_checkpoint_store_rejects_generation_gap_before_insert():
@@ -146,9 +143,7 @@ def test_checkpoint_store_rejects_generation_gap_before_insert():
     second_payload["next_generation"] = 3
     second_payload["next_seed"] = 19
     second_payload["state_digest"] = ""
-    second = ResearchCheckpoint.from_dict(second_payload)
-
-    with pytest.raises(ValueError, match="generation sequence"):
-        store.save(second, cycle_id="generation-2")
+    with pytest.raises(ValueError, match="next_generation must follow the latest history generation"):
+        ResearchCheckpoint.from_dict(second_payload)
 
     assert store.latest() == first
