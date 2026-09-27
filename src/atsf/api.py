@@ -114,9 +114,16 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         """Authenticated operational health snapshot; never grants execution authority."""
         try:
             store.list_experiments()
+            ResearchControlPlane(store._connection).verify()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"registry unavailable: {exc}") from exc
-        return {"status": "ok", "registry": "ok", "execution_authority": False, "live_execution_enabled": False}
+            raise HTTPException(status_code=503, detail=f"operational integrity unavailable: {exc}") from exc
+        return {
+            "status": "ok",
+            "registry": "ok",
+            "research_integrity": "verified",
+            "execution_authority": False,
+            "live_execution_enabled": False,
+        }
 
     @app.get("/ready", dependencies=[Auth])
     def readiness(store: ExperimentRegistry = Store) -> dict:
@@ -143,6 +150,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         control.verify()
         cycles = control.cycle_registry.list_cycles()
         checkpoint = control.latest_checkpoint()
+        latest_cycle = cycles[-1] if cycles else None
         return {
             "service": {
                 "status": "ok",
@@ -154,8 +162,11 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 "experiment_count": len(experiments),
                 "ranked_experiment_count": len(ranked),
                 "cycle_count": len(cycles),
-                "latest_generation": None if not cycles else cycles[-1].generation,
+                "latest_cycle_id": None if latest_cycle is None else latest_cycle.cycle_id,
+                "latest_generation": None if latest_cycle is None else latest_cycle.generation,
                 "checkpoint_present": checkpoint is not None,
+                "checkpoint_generation": None if checkpoint is None else checkpoint.next_generation,
+                "checkpoint_digest": None if checkpoint is None else checkpoint.state_digest,
             },
             "integrity": {
                 "research_control_plane": True,
