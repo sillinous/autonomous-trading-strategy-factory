@@ -415,6 +415,9 @@ def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     assert 'id="portfolioHealth"' in html
     assert 'id="portfolioLifecycle"' in html
     assert 'id="lifecycleHistory"' in html
+    assert 'id="readiness"' in html
+    assert 'id="observability"' in html
+    assert 'observability/summary' in html
     registry.close()
 
 
