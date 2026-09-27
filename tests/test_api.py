@@ -445,6 +445,7 @@ def test_authenticated_health_details_reports_registry_and_safety(monkeypatch):
     assert response.json() == {
         "status": "ok",
         "registry": "ok",
+        "research_integrity": "verified",
         "execution_authority": False,
         "live_execution_enabled": False,
     }
