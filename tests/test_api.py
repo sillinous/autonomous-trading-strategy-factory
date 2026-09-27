@@ -95,6 +95,37 @@ def test_operator_ui_is_served_from_root(monkeypatch):
     registry.close()
 
 
+def test_readiness_and_observability_are_persisted_and_fail_closed(monkeypatch):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    registry = ExperimentRegistry()
+    seed(registry)
+    client = TestClient(create_app(registry))
+
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+    assert ready.json()["research_integrity"] == "verified"
+    assert ready.json()["execution_authority"] is False
+
+    observability = client.get("/observability/summary")
+    assert observability.status_code == 200
+    payload = observability.json()
+    assert payload["service"]["ready"] is True
+    assert payload["research"]["experiment_count"] >= 1
+    assert payload["integrity"]["research_control_plane"] is True
+    assert payload["integrity"]["execution_authority"] is False
+    registry.close()
+
+
+def test_readiness_requires_api_key_when_configured(monkeypatch):
+    monkeypatch.setenv("ATSF_API_KEY", "test-secret")
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    assert client.get("/ready").status_code == 401
+    assert client.get("/observability/summary").status_code == 401
+    registry.close()
+
+
 def test_health_and_capabilities_are_paper_only(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
