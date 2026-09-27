@@ -107,11 +107,18 @@ def test_readiness_and_observability_are_persisted_and_fail_closed(monkeypatch):
     assert ready.json()["research_integrity"] == "verified"
     assert ready.json()["execution_authority"] is False
 
+    details = client.get("/health/details")
+    assert details.status_code == 200
+    assert details.json()["research_integrity"] == "verified"
+    assert details.json()["execution_authority"] is False
+
     observability = client.get("/observability/summary")
     assert observability.status_code == 200
     payload = observability.json()
     assert payload["service"]["ready"] is True
     assert payload["research"]["experiment_count"] >= 1
+    assert payload["research"]["latest_cycle_id"] is None
+    assert payload["research"]["checkpoint_present"] is False
     assert payload["integrity"]["research_control_plane"] is True
     assert payload["integrity"]["execution_authority"] is False
     registry.close()
@@ -122,6 +129,7 @@ def test_readiness_requires_api_key_when_configured(monkeypatch):
     registry = ExperimentRegistry()
     client = TestClient(create_app(registry))
     assert client.get("/ready").status_code == 401
+    assert client.get("/health/details").status_code == 401
     assert client.get("/observability/summary").status_code == 401
     registry.close()
 
