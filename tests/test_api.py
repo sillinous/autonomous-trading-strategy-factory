@@ -85,6 +85,13 @@ def bars(count: int = 4) -> list[dict]:
     ]
 
 
+def test_dockerfile_defines_public_liveness_healthcheck():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8")
+    assert "HEALTHCHECK" in content
+    assert "http://127.0.0.1:8000/health" in content
+    assert "/health" in content
+
 def test_operator_ui_is_served_from_root(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
