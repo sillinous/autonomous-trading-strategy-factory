@@ -118,6 +118,51 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=f"registry unavailable: {exc}") from exc
         return {"status": "ok", "registry": "ok", "execution_authority": False, "live_execution_enabled": False}
 
+    @app.get("/ready", dependencies=[Auth])
+    def readiness(store: ExperimentRegistry = Store) -> dict:
+        """Authenticated readiness probe for persisted research infrastructure."""
+        try:
+            store.list_experiments()
+            ResearchControlPlane(store._connection).verify()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"service not ready: {exc}") from exc
+        return {
+            "status": "ready",
+            "registry": "ok",
+            "research_integrity": "verified",
+            "live_execution_enabled": False,
+            "execution_authority": False,
+        }
+
+    @app.get("/observability/summary", dependencies=[Auth])
+    def observability_summary(store: ExperimentRegistry = Store) -> dict:
+        """Read-only persisted operational metrics; no synthetic runtime state."""
+        experiments = store.list_experiments()
+        ranked = store.rank_experiments()
+        control = ResearchControlPlane(store._connection)
+        control.verify()
+        cycles = control.cycle_registry.list_cycles()
+        checkpoint = control.latest_checkpoint()
+        return {
+            "service": {
+                "status": "ok",
+                "ready": True,
+                "live_execution_enabled": False,
+                "execution_authority": False,
+            },
+            "research": {
+                "experiment_count": len(experiments),
+                "ranked_experiment_count": len(ranked),
+                "cycle_count": len(cycles),
+                "latest_generation": None if not cycles else cycles[-1].generation,
+                "checkpoint_present": checkpoint is not None,
+            },
+            "integrity": {
+                "research_control_plane": True,
+                "execution_authority": False,
+            },
+        }
+
     @app.get("/capabilities", dependencies=[Auth])
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
