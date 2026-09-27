@@ -137,6 +137,7 @@ def test_readiness_requires_api_key_when_configured(monkeypatch):
     client = TestClient(create_app(registry))
     assert client.get("/ready").status_code == 401
     assert client.get("/health/details").status_code == 401
+    assert client.get("/ready").status_code == 401
     assert client.get("/observability/summary").status_code == 401
     registry.close()
 
