@@ -19,4 +19,27 @@ jobs:
       - run: ruff check src tests
       # Verify the production container remains buildable and packages the UI.
       - run: docker build --pull -t atsf:ci .
+      - name: Smoke test production container
+        run: |
+          docker run -d --name atsf-ci -p 18000:8000 atsf:ci
+          trap 'docker rm -f atsf-ci >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:18000/health", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("container did not become healthy")
+
+          with urllib.request.urlopen("http://127.0.0.1:18000/", timeout=2) as response:
+              body = response.read().decode()
+              assert response.status == 200
+              assert "ATSF Control Plane" in body
+          PY
       # Re-trigger CI after toolchain/lint configuration stabilization.
