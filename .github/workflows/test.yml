@@ -17,4 +17,6 @@ jobs:
       # Keep the full deterministic suite and coverage gate as the hard CI contract.
       - run: pytest -q --cov=atsf --cov-report=term-missing --cov-fail-under=80
       - run: ruff check src tests
+      # Verify the production container remains buildable and packages the UI.
+      - run: docker build --pull -t atsf:ci .
       # Re-trigger CI after toolchain/lint configuration stabilization.
