@@ -92,7 +92,8 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def operator_ui() -> FileResponse:
-        ui_path = Path(__file__).resolve().parents[2] / "ui" / "index.html"
+        ui_root = Path(os.getenv("ATSF_UI_PATH", str(Path.cwd() / "ui")))
+        ui_path = ui_root / "index.html"
         if not ui_path.is_file():
             raise HTTPException(status_code=404, detail="operator UI is not installed")
         return FileResponse(ui_path, media_type="text/html")
