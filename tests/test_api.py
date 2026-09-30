@@ -421,6 +421,20 @@ def test_portfolio_lifecycle_endpoint_fails_closed_when_no_lifecycle_record(monk
     registry.close()
 
 
+def test_operator_ui_supports_explicit_path_override(monkeypatch, tmp_path):
+    monkeypatch.delenv("ATSF_API_KEY", raising=False)
+    ui_dir = tmp_path / "ui"
+    ui_dir.mkdir()
+    (ui_dir / "index.html").write_text("<html>override</html>", encoding="utf-8")
+    monkeypatch.setenv("ATSF_UI_PATH", str(ui_dir))
+    registry = ExperimentRegistry()
+    client = TestClient(create_app(registry))
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.text == "<html>override</html>"
+    registry.close()
+
+
 def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     monkeypatch.delenv("ATSF_API_KEY", raising=False)
     registry = ExperimentRegistry()
