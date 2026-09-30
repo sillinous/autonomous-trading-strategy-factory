@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
+from .external_data import ExternalDataGateway
 from .feedback_registry import FeedbackEventStore
 from .lifecycle import StrategyLifecycleStage
 from .lifecycle_store import LifecycleStore
@@ -178,6 +179,42 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.get("/capabilities", dependencies=[Auth])
     def capabilities() -> ServiceConfig:
         return ServiceConfig(live_execution_enabled=False)
+
+    @app.get("/data/providers", dependencies=[Auth])
+    def data_providers() -> dict:
+        return {"providers": ExternalDataGateway().providers(), "execution_authority": False}
+
+    @app.get("/data/market/{symbol}", dependencies=[Auth])
+    def external_market_data(symbol: str, source: str = "stooq", start: datetime | None = None, end: datetime | None = None) -> dict:
+        try:
+            result = ExternalDataGateway().market_daily(symbol, source=source, start=start, end=end)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"source": result.source, "dataset": result.dataset, "fetched_at": result.fetched_at, "fingerprint": result.fingerprint, "payload": result.payload, "execution_authority": False}
+
+    @app.get("/data/macro/{series_id}", dependencies=[Auth])
+    def external_macro_data(series_id: str, start: datetime | None = None, end: datetime | None = None) -> dict:
+        try:
+            result = ExternalDataGateway().fred_series(series_id, start=start, end=end)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"source": result.source, "dataset": result.dataset, "fetched_at": result.fetched_at, "fingerprint": result.fingerprint, "payload": result.payload, "execution_authority": False}
+
+    @app.get("/data/fundamentals/{cik}", dependencies=[Auth])
+    def external_fundamentals(cik: str) -> dict:
+        try:
+            result = ExternalDataGateway().sec_companyfacts(cik)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"source": result.source, "dataset": result.dataset, "fetched_at": result.fetched_at, "fingerprint": result.fingerprint, "payload": result.payload, "execution_authority": False}
+
+    @app.get("/data/news", dependencies=[Auth])
+    def external_news(tickers: str | None = None, limit: int = 50) -> dict:
+        try:
+            result = ExternalDataGateway().news_sentiment(tickers=tickers, limit=limit)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"source": result.source, "dataset": result.dataset, "fetched_at": result.fetched_at, "fingerprint": result.fingerprint, "payload": result.payload, "execution_authority": False}
 
     @app.get("/portfolios/{portfolio_id}/lifecycle", dependencies=[Auth])
     def portfolio_lifecycle(portfolio_id: str, store: ExperimentRegistry = Store) -> dict:
