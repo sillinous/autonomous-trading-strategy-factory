@@ -50,6 +50,10 @@ Operational endpoints support an optional shared API key through `ATSF_API_KEY`.
 
 For any non-local deployment, configure authentication and place the service behind a properly secured reverse proxy or private network. Do not expose the unauthenticated default directly to the public internet.
 
+## User testing
+
+The repository includes a controlled user-testing runbook covering Docker startup, optional API-key protection, health/readiness checks, persistence verification, paper-trading workflows, replay/provenance checks, and safety boundaries: `docs/USER_TESTING.md`.
+
 ## Docker
 
 Build and run the paper-only service with:
