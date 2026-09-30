@@ -72,6 +72,19 @@ class ServiceConfig(BaseModel):
     live_execution_enabled: bool = False
 
 
+class ExternalResearchRunRequest(BaseModel):
+    dataset_id: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    source: str = Field(default="stooq", min_length=1)
+    start: datetime | None = None
+    end: datetime | None = None
+    seeds: list[StrategySpec] = Field(min_length=1)
+    generations: int = Field(default=1, ge=1)
+    population_size: int = Field(default=10, ge=1)
+    survivor_count: int = Field(default=3, ge=1)
+    seed: int = 0
+
+
 def _registry_from_environment() -> ExperimentRegistry:
     return ExperimentRegistry(os.getenv("ATSF_REGISTRY_PATH", "atsf.sqlite3"))
 
@@ -447,6 +460,41 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return certificate_result.__dict__
+
+    @app.post("/research/runs/external", status_code=201, dependencies=[Auth])
+    def external_research_run(request: ExternalResearchRunRequest, store: ExperimentRegistry = Store) -> dict:
+        try:
+            external = ExternalDataGateway().market_daily(
+                request.symbol, source=request.source, start=request.start, end=request.end
+            )
+            frame = validate_market_data(
+                pd.DataFrame(external.payload["records"]).set_index("timestamp")
+            )
+            identity = dataset_identity(frame, request.dataset_id)
+            result = run_research(
+                request.seeds,
+                frame,
+                generations=request.generations,
+                population_size=request.population_size,
+                survivor_count=request.survivor_count,
+                seed=request.seed,
+                dataset_id=request.dataset_id,
+                registry=store,
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "dataset_id": identity.dataset_id,
+            "dataset_version": identity.version,
+            "source": external.source,
+            "data_fingerprint": external.fingerprint,
+            "rows": len(frame),
+            "symbol": request.symbol,
+            "generations": len(result.generations),
+            "final_population_size": len(result.final_population),
+            "portfolio_id": result.portfolio_id,
+            "execution_authority": False,
+        }
 
     @app.post("/research/runs", status_code=201, dependencies=[Auth])
     def research_run(request: ResearchRunRequest, store: ExperimentRegistry = Store) -> dict:
