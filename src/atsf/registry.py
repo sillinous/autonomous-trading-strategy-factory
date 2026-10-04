@@ -76,8 +76,54 @@ class ExperimentRegistry:
             CREATE INDEX IF NOT EXISTS idx_experiments_dataset ON experiments(dataset_id, dataset_version);
             CREATE INDEX IF NOT EXISTS idx_experiments_strategy ON experiments(strategy_id);
             CREATE INDEX IF NOT EXISTS idx_portfolio_audit_strategy ON portfolio_audit_events(strategy_id, timestamp);
+            CREATE TABLE IF NOT EXISTS external_data_snapshots (
+                fingerprint TEXT PRIMARY KEY, source TEXT NOT NULL, dataset TEXT NOT NULL,
+                fetched_at TEXT NOT NULL, payload_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_external_snapshots_dataset ON external_data_snapshots(dataset, fetched_at);
         """)
         self._connection.commit()
+
+
+    def save_external_snapshot(self, snapshot: dict[str, Any]) -> str:
+        """Persist an immutable external-data snapshot by its content fingerprint."""
+        required = ("fingerprint", "source", "dataset", "fetched_at", "payload")
+        if not all(key in snapshot for key in required):
+            raise ValueError("external snapshot is missing required fields")
+        fingerprint = str(snapshot["fingerprint"]).strip()
+        if not fingerprint:
+            raise ValueError("external snapshot fingerprint is required")
+        payload = json.dumps(snapshot["payload"], sort_keys=True, allow_nan=False)
+        with self._connection:
+            existing = self._connection.execute(
+                "SELECT source, dataset, fetched_at, payload_json FROM external_data_snapshots WHERE fingerprint = ?",
+                (fingerprint,),
+            ).fetchone()
+            if existing is not None:
+                if (existing[0], existing[1], existing[2], existing[3]) != (
+                    str(snapshot["source"]), str(snapshot["dataset"]), str(snapshot["fetched_at"]), payload
+                ):
+                    raise ValueError("external snapshot fingerprint collision")
+                return fingerprint
+            self._connection.execute(
+                "INSERT INTO external_data_snapshots(fingerprint, source, dataset, fetched_at, payload_json) VALUES (?, ?, ?, ?, ?)",
+                (fingerprint, str(snapshot["source"]), str(snapshot["dataset"]), str(snapshot["fetched_at"]), payload),
+            )
+        return fingerprint
+
+    def get_external_snapshot(self, fingerprint: str) -> dict[str, Any] | None:
+        if not isinstance(fingerprint, str) or not fingerprint.strip():
+            raise ValueError("fingerprint is required")
+        row = self._connection.execute(
+            "SELECT fingerprint, source, dataset, fetched_at, payload_json FROM external_data_snapshots WHERE fingerprint = ?",
+            (fingerprint.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "fingerprint": row["fingerprint"], "source": row["source"], "dataset": row["dataset"],
+            "fetched_at": row["fetched_at"], "payload": json.loads(row["payload_json"]),
+        }
 
     def close(self) -> None:
         self._connection.close()
