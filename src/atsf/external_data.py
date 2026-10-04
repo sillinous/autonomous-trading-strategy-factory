@@ -213,34 +213,6 @@ def _external_snapshot(
     )
 
 
-@dataclass(frozen=True)
-class ExternalResearchSnapshot:
-    """Immutable collection of external inputs consumed by a research run."""
-
-    market: ExternalDataEnvelope
-    macro: tuple[ExternalDataEnvelope, ...] = ()
-    fundamentals: tuple[ExternalDataEnvelope, ...] = ()
-    news: ExternalDataEnvelope | None = None
-    fingerprint: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.market.fingerprint:
-            raise ValueError("market snapshot fingerprint is required")
-        if not self.fingerprint:
-            canonical = {
-                "market": self.market.fingerprint,
-                "macro": [item.fingerprint for item in self.macro],
-                "fundamentals": [item.fingerprint for item in self.fundamentals],
-                "news": None if self.news is None else self.news.fingerprint,
-            }
-            object.__setattr__(
-                self,
-                "fingerprint",
-                hashlib.sha256(
-                    json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-                ).hexdigest(),
-            )
-
 
 def build_external_research_snapshot(
     gateway: ExternalDataGateway,
