@@ -449,6 +449,10 @@ def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     assert 'id="readiness"' in html
     assert 'id="observability"' in html
     assert 'observability/summary' in html
+    assert 'id="dataSymbol"' in html
+    assert 'id="externalData"' in html
+    assert '/data/snapshot' in html
+    assert 'refreshExternalData' in html
     registry.close()
 
 
