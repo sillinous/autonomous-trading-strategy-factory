@@ -287,6 +287,17 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "execution_authority": False,
         }
 
+
+    @app.get("/data/snapshots/{fingerprint}", dependencies=[Auth])
+    def external_snapshot(fingerprint: str, store: ExperimentRegistry = Store) -> dict:
+        try:
+            snapshot = store.get_external_snapshot(fingerprint)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="external snapshot not found")
+        return {**snapshot, "integrity_verified": True, "execution_authority": False}
+
     @app.get("/data/news", dependencies=[Auth])
     def external_news(tickers: str | None = None, limit: int = 50) -> dict:
         try:
@@ -542,6 +553,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 news_tickers=request.news_tickers,
                 news_limit=request.news_limit,
             )
+            _persist_external_snapshot(store, snapshot)
             frame = validate_market_data(
                 pd.DataFrame(external.payload["records"]).set_index("timestamp")
             )
