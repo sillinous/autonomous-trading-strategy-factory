@@ -211,3 +211,53 @@ def _external_snapshot(
         fundamentals=fundamentals,
         news=news,
     )
+
+
+@dataclass(frozen=True)
+class ExternalResearchSnapshot:
+    """Immutable collection of external inputs consumed by a research run."""
+
+    market: ExternalDataEnvelope
+    macro: tuple[ExternalDataEnvelope, ...] = ()
+    fundamentals: tuple[ExternalDataEnvelope, ...] = ()
+    news: ExternalDataEnvelope | None = None
+    fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.market.fingerprint:
+            raise ValueError("market snapshot fingerprint is required")
+        if not self.fingerprint:
+            canonical = {
+                "market": self.market.fingerprint,
+                "macro": [item.fingerprint for item in self.macro],
+                "fundamentals": [item.fingerprint for item in self.fundamentals],
+                "news": None if self.news is None else self.news.fingerprint,
+            }
+            object.__setattr__(
+                self,
+                "fingerprint",
+                hashlib.sha256(
+                    json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            )
+
+
+def build_external_research_snapshot(
+    gateway: ExternalDataGateway,
+    *,
+    market: ExternalDataEnvelope,
+    macro_series: tuple[str, ...] = (),
+    ciks: tuple[str, ...] = (),
+    news_tickers: str | None = None,
+    news_limit: int = 50,
+) -> ExternalResearchSnapshot:
+    """Fetch explicitly requested external inputs as one immutable snapshot."""
+    macro = tuple(gateway.fred_series(series) for series in macro_series)
+    fundamentals = tuple(gateway.sec_companyfacts(cik) for cik in ciks)
+    news = gateway.news_sentiment(tickers=news_tickers, limit=news_limit) if news_tickers else None
+    return ExternalResearchSnapshot(
+        market=market,
+        macro=macro,
+        fundamentals=fundamentals,
+        news=news,
+    )
