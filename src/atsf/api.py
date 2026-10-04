@@ -89,6 +89,33 @@ class ExternalResearchRunRequest(BaseModel):
     seed: int = 0
 
 
+
+def _persist_external_snapshot(store: ExperimentRegistry, snapshot) -> None:
+    """Persist every external component plus the immutable composite manifest."""
+    envelopes = [snapshot.market, *snapshot.macro, *snapshot.fundamentals]
+    if snapshot.news is not None:
+        envelopes.append(snapshot.news)
+    for envelope in envelopes:
+        store.save_external_snapshot({
+            "fingerprint": envelope.fingerprint,
+            "source": envelope.source,
+            "dataset": envelope.dataset,
+            "fetched_at": envelope.fetched_at,
+            "payload": envelope.payload,
+        })
+    store.save_external_snapshot({
+        "fingerprint": snapshot.fingerprint,
+        "source": "atsf-composite",
+        "dataset": "research_snapshot",
+        "fetched_at": snapshot.market.fetched_at,
+        "payload": {
+            "market": snapshot.market.fingerprint,
+            "macro": [item.fingerprint for item in snapshot.macro],
+            "fundamentals": [item.fingerprint for item in snapshot.fundamentals],
+            "news": None if snapshot.news is None else snapshot.news.fingerprint,
+        },
+    })
+
 def _registry_from_environment() -> ExperimentRegistry:
     return ExperimentRegistry(os.getenv("ATSF_REGISTRY_PATH", "atsf.sqlite3"))
 
