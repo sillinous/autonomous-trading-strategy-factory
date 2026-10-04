@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .certificate_integrity import verify_persisted_certificate
 from .data import dataset_identity, validate_market_data
-from .external_data import ExternalDataGateway
+from .external_data import ExternalDataGateway, build_external_research_snapshot
 from .feedback_registry import FeedbackEventStore
 from .lifecycle import StrategyLifecycleStage
 from .lifecycle_store import LifecycleStore
@@ -78,6 +78,10 @@ class ExternalResearchRunRequest(BaseModel):
     source: str = Field(default="stooq", min_length=1)
     start: datetime | None = None
     end: datetime | None = None
+    macro_series: list[str] = Field(default_factory=list)
+    ciks: list[str] = Field(default_factory=list)
+    news_tickers: str | None = None
+    news_limit: int = Field(default=50, ge=1, le=200)
     seeds: list[StrategySpec] = Field(min_length=1)
     generations: int = Field(default=1, ge=1)
     population_size: int = Field(default=10, ge=1)
@@ -220,6 +224,40 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return {"source": result.source, "dataset": result.dataset, "fetched_at": result.fetched_at, "fingerprint": result.fingerprint, "payload": result.payload, "execution_authority": False}
+
+    @app.get("/data/snapshot", dependencies=[Auth])
+    def external_data_snapshot(
+        symbol: str,
+        source: str = "stooq",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        macro_series: str | None = None,
+        ciks: str | None = None,
+        news_tickers: str | None = None,
+        news_limit: int = 50,
+    ) -> dict:
+        """Fetch one auditable snapshot spanning market, macro, fundamentals, and news."""
+        try:
+            gateway = ExternalDataGateway()
+            market = gateway.market_daily(symbol, source=source, start=start, end=end)
+            snapshot = build_external_research_snapshot(
+                gateway,
+                market=market,
+                macro_series=tuple(x.strip().upper() for x in (macro_series or "").split(",") if x.strip()),
+                ciks=tuple(x.strip() for x in (ciks or "").split(",") if x.strip()),
+                news_tickers=news_tickers,
+                news_limit=news_limit,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "fingerprint": snapshot.fingerprint,
+            "market": snapshot.market.__dict__,
+            "macro": [item.__dict__ for item in snapshot.macro],
+            "fundamentals": [item.__dict__ for item in snapshot.fundamentals],
+            "news": None if snapshot.news is None else snapshot.news.__dict__,
+            "execution_authority": False,
+        }
 
     @app.get("/data/news", dependencies=[Auth])
     def external_news(tickers: str | None = None, limit: int = 50) -> dict:
@@ -464,8 +502,17 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
     @app.post("/research/runs/external", status_code=201, dependencies=[Auth])
     def external_research_run(request: ExternalResearchRunRequest, store: ExperimentRegistry = Store) -> dict:
         try:
-            external = ExternalDataGateway().market_daily(
+            gateway = ExternalDataGateway()
+            external = gateway.market_daily(
                 request.symbol, source=request.source, start=request.start, end=request.end
+            )
+            snapshot = build_external_research_snapshot(
+                gateway,
+                market=external,
+                macro_series=tuple(x.strip().upper() for x in request.macro_series if x.strip()),
+                ciks=tuple(x.strip() for x in request.ciks if x.strip()),
+                news_tickers=request.news_tickers,
+                news_limit=request.news_limit,
             )
             frame = validate_market_data(
                 pd.DataFrame(external.payload["records"]).set_index("timestamp")
@@ -488,6 +535,12 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "dataset_version": identity.version,
             "source": external.source,
             "data_fingerprint": external.fingerprint,
+            "external_snapshot_fingerprint": snapshot.fingerprint,
+            "external_inputs": {
+                "macro_series": [item.payload["series_id"] for item in snapshot.macro],
+                "fundamentals_ciks": [item.payload["cik"] for item in snapshot.fundamentals],
+                "news": snapshot.news is not None,
+            },
             "rows": len(frame),
             "symbol": request.symbol,
             "generations": len(result.generations),
