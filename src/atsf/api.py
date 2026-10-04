@@ -567,6 +567,8 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 seed=request.seed,
                 dataset_id=request.dataset_id,
                 registry=store,
+                external_snapshot_fingerprint=snapshot.fingerprint,
+                data_source=external.source,
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -576,6 +578,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
             "source": external.source,
             "data_fingerprint": external.fingerprint,
             "external_snapshot_fingerprint": snapshot.fingerprint,
+            "research_external_snapshot_fingerprint": result.external_snapshot_fingerprint,
             "external_inputs": {
                 "macro_series": [item.payload["series_id"] for item in snapshot.macro],
                 "fundamentals_ciks": [item.payload["cik"] for item in snapshot.fundamentals],
