@@ -275,6 +275,7 @@ def create_app(registry: ExperimentRegistry | None = None) -> FastAPI:
                 news_tickers=news_tickers,
                 news_limit=news_limit,
             )
+            _persist_external_snapshot(store, snapshot)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return {
