@@ -64,6 +64,20 @@ docker compose up --build -d
 
 The SQLite registry is stored in the named `atsf-data` volume. The container runs as a non-root user and includes an HTTP healthcheck. Docker Compose binds the API to the host loopback interface by default.
 
+## External data gateway
+
+User-testing builds expose the authenticated external-data surface:
+
+- `GET /data/providers` — configured provider catalog and capabilities.
+- `GET /data/market/{symbol}` — normalized real OHLCV data.
+- `GET /data/macro/{series_id}` — FRED observations.
+- `GET /data/fundamentals/{cik}` — SEC company facts.
+- `GET /data/news` — Alpha Vantage news/sentiment when configured.
+- `GET /data/snapshot` — one immutable, fingerprinted market + macro + fundamentals + news snapshot.
+- `POST /research/runs/external` — runs deterministic research against externally fetched market data while retaining the external snapshot fingerprint.
+
+The gateway never substitutes synthetic production data. Provider credentials are injected through environment variables, never stored in source control. Copy `.env.example` to your local environment and supply `ALPHAVANTAGE_API_KEY` and `ATSF_SEC_USER_AGENT` when those providers are needed. Stooq market history and FRED's public CSV endpoint require no credentials in the current gateway. Every external snapshot is fingerprinted so research can be tied to the exact input received.
+
 ## Market-data providers
 
 `atsf.provider.MarketDataProvider` defines the vendor-neutral contract. Each provider exposes immutable `ProviderMetadata(source, timeframe, schema_version)`, which is the authoritative provenance for data it emits. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution.
