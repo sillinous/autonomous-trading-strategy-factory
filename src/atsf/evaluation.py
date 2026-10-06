@@ -6,7 +6,7 @@ import pandas as pd
 
 from .backtest import BacktestConfig, BacktestResult, run_long_signal_backtest
 from .fitness import FitnessPolicy, FitnessResult, score_strategy
-from .signals import strategy_signals
+from .signals import position_state, strategy_signals
 from .splits import WalkForwardWindow, walk_forward_windows
 from .strategy import StrategySpec
 from .validation import ValidationPolicy, ValidationResult, validate_equity
@@ -40,24 +40,24 @@ class WalkForwardEvaluation:
             object.__setattr__(self, "folds", tuple(self.windows))
 
 
-def _position_signal(entry: pd.Series, exit_: pd.Series) -> pd.Series:
-    if not entry.index.equals(exit_.index):
-        raise ValueError("entry and exit indexes must match")
-    active = False
-    values: list[bool] = []
-    for timestamp in entry.index:
-        if bool(exit_.loc[timestamp]): active = False
-        if bool(entry.loc[timestamp]): active = True
-        values.append(active)
-    return pd.Series(values, index=entry.index, dtype=bool)
+_position_signal = position_state
 
 
 def _evaluate_segment(data: pd.DataFrame, strategy: StrategySpec, backtest_config: BacktestConfig | None,
-                      validation_policy: ValidationPolicy | None, fitness_policy: FitnessPolicy | None) -> SegmentEvaluation:
-    entry, exit_ = strategy_signals(data, strategy)
-    backtest = run_long_signal_backtest(data, _position_signal(entry, exit_), strategy, backtest_config)
+                      validation_policy: ValidationPolicy | None, fitness_policy: FitnessPolicy | None,
+                      position: pd.Series | None = None) -> SegmentEvaluation:
+    """Evaluate one segment. ``position`` should come from indicators warmed on prior history."""
+    if position is None:
+        entry, exit_ = strategy_signals(data, strategy)
+        position = position_state(entry, exit_)
+    backtest = run_long_signal_backtest(data, position, strategy, backtest_config)
     validation = validate_equity(backtest.equity, validation_policy)
     return SegmentEvaluation(backtest, validation, score_strategy(validation.sharpe, validation.drawdown, fitness_policy))
+
+
+def _warm_positions(full_entry: pd.Series, full_exit: pd.Series, segment: pd.DataFrame) -> pd.Series:
+    """Slice causally computed full-history signals to a segment, starting flat."""
+    return position_state(full_entry.loc[segment.index], full_exit.loc[segment.index])
 
 
 def evaluate_walk_forward(data: pd.DataFrame, strategy: StrategySpec, train_size: int, validation_size: int,
@@ -69,10 +69,15 @@ def evaluate_walk_forward(data: pd.DataFrame, strategy: StrategySpec, train_size
     oos_returns: list[pd.Series] = []
     oos_trade_returns: list[float] = []
     all_passed = True
+    # Indicators are causal, so computing them once on the full history and slicing is
+    # equivalent to warming each segment on everything before it, without look-ahead.
+    full_entry, full_exit = strategy_signals(data, strategy)
     for window in windows:
-        train = _evaluate_segment(window.train, strategy, backtest_config, validation_policy, fitness_policy)
-        validation = _evaluate_segment(window.validation, strategy, backtest_config, validation_policy, fitness_policy)
-        test = _evaluate_segment(window.test, strategy, backtest_config, validation_policy, fitness_policy)
+        train, validation, test = (
+            _evaluate_segment(segment, strategy, backtest_config, validation_policy, fitness_policy,
+                              _warm_positions(full_entry, full_exit, segment))
+            for segment in (window.train, window.validation, window.test)
+        )
         evaluations.extend((train, validation, test))
         all_passed = all_passed and train.fitness.eligible and validation.fitness.eligible and test.fitness.eligible
         oos_returns.append(test.backtest.equity.pct_change().fillna(0.0))
