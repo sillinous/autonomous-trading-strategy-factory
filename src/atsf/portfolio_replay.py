@@ -9,6 +9,8 @@ from .execution_lineage import FillLineage, verify_fill_lineage
 from .execution_manifest import ExecutionManifest, execution_manifest
 from .ledger_replay import validate_execution_ledger
 from .portfolio_audit import PortfolioAuditEvent, audit_event_id
+from .portfolio_paper import run_paper_portfolio
+from .promotion import PromotionDecision
 from .portfolio_run import build_portfolio_run_identity
 from .registry import ExperimentRegistry
 from .signals import strategy_signals
@@ -104,7 +106,12 @@ def verify_persisted_portfolio_run(store: ExperimentRegistry, run_id: str, data:
             strategies[strategy_id] = strategy
         try:
             signals = {strategy_id: strategy_signals(data[strategy_id], strategy) for strategy_id, strategy in strategies.items()}
-            liquidation_timestamp = pd.Timestamp(ordered_events[-1].timestamp) if bool(run["halted"]) and ordered_events else None
-            if not verify_fill_lineage(ordered_events, lineage, signals, halted=bool(run["halted"]), liquidation_timestamp=liquidation_timestamp): return _failure(run_id, "persisted fill lineage does not reproduce from stored strategies and market data", actual)
+            # Full deterministic re-execution on the shared engine: the stored fills must be
+            # exactly the fills the persisted strategies produce on the persisted data.
+            max_drawdown = config.get("max_drawdown")
+            paper = run_paper_portfolio(data, strategies, {key: float(value) for key, value in weights.items()}, decisions={strategy_id: PromotionDecision(stage="paper", eligible=True, reasons=()) for strategy_id in strategies}, initial_cash=float(config["initial_cash"]), commission_bps=float(config["commission_bps"]), slippage_bps=float(config["slippage_bps"]), max_drawdown=None if max_drawdown is None else float(max_drawdown))
+            replayed = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
+            if tuple(audit_event_id(event) for event in replayed) != tuple(audit_event_id(event) for event in ordered_events): return _failure(run_id, "persisted fills do not reproduce from stored strategies and market data", actual)
+            if not verify_fill_lineage(ordered_events, lineage, signals, halted=bool(run["halted"]), liquidation_timestamp=paper.liquidation_timestamp, risk_exits=paper.risk_exits): return _failure(run_id, "persisted fill lineage does not reproduce from stored strategies and market data", actual)
         except (KeyError, IndexError, TypeError, ValueError) as exc: return _failure(run_id, f"signal replay failed: {exc}", actual)
     return ReplayVerification(run_id, True, actual)

@@ -8,7 +8,8 @@ import pandas as pd
 from .paper import PaperBroker, PaperConfig, PaperFill
 from .paper_risk import PaperRiskController
 from .promotion import PromotionDecision
-from .signals import strategy_signals
+from .execution import ExecutionEvent, ExecutionPolicy, SleeveEngine
+from .signals import position_state, strategy_signals
 from .strategy import StrategySpec
 
 
@@ -26,10 +27,26 @@ class PortfolioPaperResult:
     final_equity: float
     halted: bool
     halt_reason: str | None
+    liquidation_timestamp: pd.Timestamp | None = None
+    events: tuple[tuple[str, ExecutionEvent], ...] = ()
+
+    @property
+    def risk_exits(self) -> dict[str, dict[pd.Timestamp, str]]:
+        """Sleeve-level stop/kill exits, keyed by strategy and fill timestamp."""
+        exits: dict[str, dict[pd.Timestamp, str]] = {}
+        for strategy_id, event in self.events:
+            if event.reason in {"stop_loss", "max_drawdown"}:
+                exits.setdefault(strategy_id, {})[pd.Timestamp(event.timestamp)] = event.reason
+        return exits
 
 
-def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, StrategySpec], weights: dict[str, float], *, decisions: dict[str, PromotionDecision], initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None) -> PortfolioPaperResult:
-    """Run multiple promotion-approved strategies through isolated paper brokers."""
+def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, StrategySpec], weights: dict[str, float], *, decisions: dict[str, PromotionDecision], initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None, policy: ExecutionPolicy | None = None) -> PortfolioPaperResult:
+    """Run promotion-approved strategies as isolated sleeves on the shared execution engine.
+
+    Each sleeve follows exactly the backtest execution contract. A portfolio drawdown
+    breach observed at a bar's close flattens every sleeve on the next bar (or at the
+    close when the breach is on the final bar) and blocks further entries.
+    """
     if not strategies:
         raise ValueError("strategies cannot be empty")
     if set(data) != set(strategies) or set(weights) != set(strategies):
@@ -56,8 +73,9 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     reference_index = indexes[0]
     if any(not index.equals(reference_index) for index in indexes[1:]):
         raise ValueError("all paper portfolio datasets must use the same timestamps")
-    brokers: dict[str, PaperBroker] = {}
-    signals: dict[str, tuple[pd.Series, pd.Series]] = {}
+    if len(reference_index) == 0:
+        raise ValueError("paper portfolio data cannot be empty")
+    engines: dict[str, SleeveEngine] = {}
     for strategy_id, strategy in strategies.items():
         frame = data[strategy_id]
         if frame.empty or "close" not in frame.columns:
@@ -65,52 +83,36 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         close = pd.to_numeric(frame["close"], errors="coerce")
         if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
             raise ValueError(f"data for {strategy_id} must contain finite positive close prices")
-        brokers[strategy_id] = PaperBroker(PaperConfig(initial_cash=initial_cash * weights[strategy_id], commission_bps=commission_bps, slippage_bps=slippage_bps))
-        signals[strategy_id] = strategy_signals(frame, strategy)
+        broker = PaperBroker(PaperConfig(initial_cash=initial_cash * weights[strategy_id], commission_bps=commission_bps, slippage_bps=slippage_bps))
+        entry, exit_ = strategy_signals(frame, strategy)
+        engines[strategy_id] = SleeveEngine(strategy, frame, position_state(entry, exit_), broker, policy)
     risk = PaperRiskController(max_drawdown)
     reserve = initial_cash * (1.0 - total_weight)
     snapshots: list[PortfolioPaperSnapshot] = []
-    fills: list[tuple[str, PaperFill]] = []
-    for timestamp_index, timestamp in enumerate(reference_index):
-        equity = reserve
-        for strategy_id, broker in brokers.items():
-            frame = data[strategy_id]
-            price = float(frame.loc[timestamp, "close"])
-            entry, exit_ = signals[strategy_id]
-            if timestamp_index == 0 and broker.position == 0 and broker.cash > 0:
-                desired = broker.cash * strategies[strategy_id].position_sizing.max_position / price
-                quantity = min(desired, broker.max_affordable_quantity(price))
-                if quantity > 0:
-                    fills.append((strategy_id, broker.execute(timestamp, "buy", quantity, price)))
-            elif bool(entry.loc[timestamp]) and broker.position == 0:
-                desired = broker.cash * strategies[strategy_id].position_sizing.max_position / price
-                quantity = min(desired, broker.max_affordable_quantity(price))
-                if quantity > 0:
-                    fills.append((strategy_id, broker.execute(timestamp, "buy", quantity, price)))
-            elif bool(exit_.loc[timestamp]) and broker.position > 0:
-                fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
-            equity += broker.mark(timestamp, price).equity
-        if not risk.check(equity):
-            for strategy_id, broker in brokers.items():
-                if broker.position > 0:
-                    price = float(data[strategy_id].loc[timestamp, "close"])
-                    fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
-            equity = reserve + sum(broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity for strategy_id, broker in brokers.items())
-            snapshots.append(PortfolioPaperSnapshot(timestamp, equity, reserve))
-            break
+    halted = False
+    halt_reason: str | None = None
+    liquidation_timestamp: pd.Timestamp | None = None
+    last = len(reference_index) - 1
+    for i, timestamp in enumerate(reference_index):
+        equity = reserve + sum(engine.step(i) for engine in engines.values())
+        if not halted and not risk.check(equity):
+            halted, halt_reason = True, risk.state.reason
+            for engine in engines.values():
+                engine.request_halt()
+            if i == last:
+                for engine in engines.values():
+                    engine.liquidate(i, "risk_halt")
+                equity = reserve + sum(engine.equity[i] for engine in engines.values())
+            liquidation_timestamp = reference_index[min(i + 1, last)]
         snapshots.append(PortfolioPaperSnapshot(timestamp, equity, reserve))
-    if not snapshots:
-        raise ValueError("paper portfolio data cannot be empty")
-    if not risk.state.halted:
-        timestamp = reference_index[-1]
-        for strategy_id, broker in brokers.items():
-            if broker.position > 0:
-                price = float(data[strategy_id].loc[timestamp, "close"])
-                fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
-        final_equity = reserve + sum(broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity for strategy_id, broker in brokers.items())
-        if snapshots[-1].timestamp == timestamp:
-            snapshots[-1] = PortfolioPaperSnapshot(timestamp, final_equity, reserve)
-        else:
-            snapshots.append(PortfolioPaperSnapshot(timestamp, final_equity, reserve))
-    state = risk.state
-    return PortfolioPaperResult(tuple(snapshots), tuple(fills), snapshots[-1].equity, state.halted, state.reason)
+    if not halted:
+        for engine in engines.values():
+            if engine.in_position:
+                engine.liquidate(last, "max_drawdown" if engine.halted_at is not None else "end_of_sample")
+        snapshots[-1] = PortfolioPaperSnapshot(reference_index[-1], reserve + sum(engine.equity[last] for engine in engines.values()), reserve)
+    ordered = sorted(
+        ((strategy_id, event) for strategy_id, engine in engines.items() for event in engine.events),
+        key=lambda item: (item[1].timestamp, list(engines).index(item[0])),
+    )
+    fills = tuple((strategy_id, PaperFill(event.timestamp, event.action, event.quantity, event.price, event.fee)) for strategy_id, event in ordered)
+    return PortfolioPaperResult(tuple(snapshots), fills, snapshots[-1].equity, halted, halt_reason, liquidation_timestamp if halted else None, tuple(ordered))
