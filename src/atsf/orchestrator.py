@@ -51,6 +51,7 @@ def evaluate_candidate(
     promotion_policy: PromotionPolicy | None = None,
     benchmark: pd.Series | None = None,
     perturbation_samples: int = 20,
+    n_trials: int = 1,
 ) -> CandidateEvaluation:
     """Run one candidate through deterministic validation and promotion gates."""
     if candidate.strategy.side.value != "long":
@@ -126,6 +127,7 @@ def evaluate_candidate(
         regime,
         robustness,
         promotion_policy,
+        n_trials=n_trials,
     )
     fitness = FitnessResult(
         score=walk_forward.oos_sharpe,

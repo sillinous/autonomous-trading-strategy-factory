@@ -3,9 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
+import numpy as np
+import pandas as pd
+
 from .genome import genome_distance
 from .orchestrator import CandidateEvaluation
 from .population import Candidate
+from .statistics import OverfittingReport, deflated_sharpe_ratio, probability_of_backtest_overfitting
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,9 @@ class SelectionPolicy:
     min_monte_carlo_pass_rate: float = 0.0
     preserve_diversity: bool = True
     min_genome_distance: float = 0.0
+    min_deflated_sharpe: float = 0.95
+    max_pbo: float = 0.5
+    pbo_blocks: int = 10
 
     def __post_init__(self) -> None:
         if self.population_size <= 0:
@@ -31,6 +38,42 @@ class SelectionPolicy:
             raise ValueError("min_monte_carlo_pass_rate must be between 0 and 1")
         if not 0 <= self.min_genome_distance <= 1:
             raise ValueError("min_genome_distance must be between 0 and 1")
+        if not 0 <= self.min_deflated_sharpe < 1:
+            raise ValueError("min_deflated_sharpe must be in [0, 1)")
+        if not 0 < self.max_pbo <= 1:
+            raise ValueError("max_pbo must be in (0, 1]")
+        if self.pbo_blocks < 2 or self.pbo_blocks % 2:
+            raise ValueError("pbo_blocks must be an even integer >= 2")
+
+
+def _oos_returns(evaluation: CandidateEvaluation) -> pd.Series | None:
+    walk_forward = getattr(evaluation, "walk_forward", None)
+    returns = getattr(walk_forward, "oos_returns", None)
+    return returns if isinstance(returns, pd.Series) and len(returns) >= 3 else None
+
+
+def population_trial_statistics(evaluations: list[CandidateEvaluation]) -> tuple[int, float | None]:
+    """Number of trials and cross-sectional variance of per-period OOS Sharpes."""
+    sharpes = []
+    for evaluation in evaluations:
+        returns = _oos_returns(evaluation)
+        if returns is not None and float(returns.std(ddof=1)) > 0:
+            sharpes.append(float(returns.mean() / returns.std(ddof=1)))
+    variance = float(np.var(sharpes, ddof=1)) if len(sharpes) >= 2 else None
+    return len(evaluations), variance
+
+
+def population_overfitting(evaluations: list[CandidateEvaluation], n_blocks: int = 10) -> OverfittingReport | None:
+    """PBO across the evaluated population's aligned OOS return streams, if computable."""
+    series = {evaluation.candidate_id: _oos_returns(evaluation) for evaluation in evaluations}
+    series = {key: value for key, value in series.items() if value is not None}
+    if len(series) < 2:
+        return None
+    frame = pd.concat(series, axis=1, join="inner").dropna()
+    frame = frame.T.drop_duplicates().T  # identical return streams are a single trial
+    if frame.shape[1] < 2 or len(frame) < n_blocks * 2:
+        return None
+    return probability_of_backtest_overfitting(frame, n_blocks)
 
 
 def _robustness_ratio(evaluation: CandidateEvaluation) -> float:
@@ -44,12 +87,20 @@ def _robustness_ratio(evaluation: CandidateEvaluation) -> float:
     return min(finite) / baseline
 
 
-def _eligible(evaluation: CandidateEvaluation, policy: SelectionPolicy) -> bool:
+def _eligible(evaluation: CandidateEvaluation, policy: SelectionPolicy, n_trials: int = 1,
+              trial_variance: float | None = None) -> bool:
     if policy.require_promotion and not evaluation.promotion.eligible:
         return False
     if not evaluation.validation_passed:
         return False
-    if evaluation.backtest.max_drawdown > policy.max_drawdown:
+    if policy.min_deflated_sharpe > 0:
+        returns = _oos_returns(evaluation)
+        if returns is None:
+            return False
+        if deflated_sharpe_ratio(returns, n_trials, trial_variance).probability < policy.min_deflated_sharpe:
+            return False
+    # drawdowns are reported as negative fractions; compare magnitudes
+    if abs(float(evaluation.backtest.max_drawdown)) > policy.max_drawdown:
         return False
     if _robustness_ratio(evaluation) < policy.min_robustness_equity_ratio:
         return False
@@ -149,6 +200,8 @@ def select_population(
     candidates: list[Candidate],
     evaluations: list[CandidateEvaluation],
     policy: SelectionPolicy,
+    *,
+    prior_trials: int = 0,
 ) -> list[Candidate]:
     """Select a deterministic, promotion-aware population from evaluated candidates.
 
@@ -166,7 +219,20 @@ def select_population(
     if {evaluation.candidate_id for evaluation in evaluations} != set(by_id):
         raise ValueError("evaluations must exactly match candidate IDs")
 
-    eligible = [evaluation for evaluation in evaluations if _eligible(evaluation, policy)]
+    overfitting = population_overfitting(evaluations, policy.pbo_blocks)
+    if overfitting is not None and overfitting.pbo > policy.max_pbo:
+        raise ValueError(
+            f"population is overfit: PBO {overfitting.pbo:.2f} exceeds {policy.max_pbo:.2f}"
+        )
+    if prior_trials < 0:
+        raise ValueError("prior_trials must be non-negative")
+    n_trials, trial_variance = population_trial_statistics(evaluations)
+    # Every variant evaluated in earlier generations counts toward the search budget.
+    n_trials += prior_trials
+    eligible = [
+        evaluation for evaluation in evaluations
+        if _eligible(evaluation, policy, n_trials, trial_variance)
+    ]
     if not eligible:
         raise ValueError("no candidates satisfy selection gates")
 

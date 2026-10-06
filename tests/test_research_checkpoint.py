@@ -8,6 +8,7 @@ from atsf.research_cycle import ResearchCyclePolicy
 from atsf.research_runner import ResearchRunPolicy, run_research
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
+from tests.fixtures import skilled_walk_forward
 
 
 def fake_evaluation(candidate):
@@ -22,6 +23,7 @@ def fake_evaluation(candidate):
             baseline=SimpleNamespace(equity=baseline),
             scenarios=(("stress", SimpleNamespace(equity=pd.Series([1.0, 95.0]))),),
         ),
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=True),
         validation_passed=True,
     )

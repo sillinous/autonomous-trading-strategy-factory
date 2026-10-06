@@ -14,6 +14,7 @@ from atsf.strategy import (
     StrategySpec,
 )
 from atsf.successor import admit_successor, successor_lineage
+from tests.fixtures import skilled_walk_forward
 
 
 def make_strategy() -> StrategySpec:
@@ -42,7 +43,7 @@ def evaluation(candidate_id="child-1", eligible=True):
         candidate_id=candidate_id,
         promotion=SimpleNamespace(eligible=eligible, stage="paper" if eligible else "research", reasons=() if eligible else ("failed",)),
         fitness=SimpleNamespace(score=1.0),
-        walk_forward=SimpleNamespace(oos_sharpe=1.0, oos_drawdown=0.1),
+        walk_forward=SimpleNamespace(oos_sharpe=1.0, oos_drawdown=0.1, oos_returns=skilled_walk_forward().oos_returns),
     )
 
 

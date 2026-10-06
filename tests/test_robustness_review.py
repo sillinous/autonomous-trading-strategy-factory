@@ -25,6 +25,7 @@ from atsf.strategy import (
     Signal,
     StrategySpec,
 )
+from tests.fixtures import skilled_walk_forward
 
 
 def make_candidate() -> Candidate:
@@ -59,7 +60,7 @@ def make_evaluation(candidate: Candidate):
         backtest=SimpleNamespace(final_equity=1.1),
         validation_passed=True,
         fitness=SimpleNamespace(score=1.2),
-        walk_forward=SimpleNamespace(oos_sharpe=1.2),
+        walk_forward=SimpleNamespace(oos_sharpe=1.2, oos_returns=skilled_walk_forward().oos_returns),
         monte_carlo=SimpleNamespace(pass_rate=0.99),
         perturbation=SimpleNamespace(pass_rate=0.95),
         regime=SimpleNamespace(score=-0.01),

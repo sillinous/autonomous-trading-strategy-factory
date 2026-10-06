@@ -10,6 +10,7 @@ from atsf.research_pipeline import evaluate_research_execution, execute_research
 from atsf.research_planner import ResearchPlan
 from atsf.research_queue import ResearchReason, ResearchRequest
 from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
+from tests.fixtures import skilled_walk_forward
 
 
 def _strategy(period: int = 20) -> StrategySpec:
@@ -66,6 +67,7 @@ def test_evaluate_research_execution_uses_normal_candidate_gate(monkeypatch):
         calls.append((candidate.strategy_id, dataset_id, dataset_version, kwargs["seed"]))
         return SimpleNamespace(
             candidate_id=candidate.strategy_id,
+            walk_forward=skilled_walk_forward(),
             promotion=SimpleNamespace(eligible=candidate.strategy_id.endswith("0")),
         )
 

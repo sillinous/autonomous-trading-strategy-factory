@@ -5,6 +5,7 @@ from atsf.research_budget import ResearchBudgetPolicy
 from atsf.research_director import ResearchDirectorPolicy
 from atsf.research_queue import ResearchReason
 from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, Signal, StrategySpec
+from tests.fixtures import skilled_walk_forward
 
 
 def strategy(period: int) -> StrategySpec:
@@ -23,6 +24,7 @@ def evaluation(candidate_id: str, eligible: bool, score: float, simulations: int
         candidate_id=candidate_id,
         validation_passed=eligible,
         fitness=SimpleNamespace(score=score),
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=eligible),
         robustness=SimpleNamespace(passed=eligible),
         monte_carlo=SimpleNamespace(pass_rate=0.9, simulations=simulations),

@@ -6,12 +6,14 @@ from types import SimpleNamespace
 from atsf.lifecycle import StrategyLifecycleStage
 from atsf.lifecycle_integration import synchronize_candidate_lifecycle
 from atsf.lifecycle_store import LifecycleStore
+from tests.fixtures import skilled_walk_forward
 
 
 def evaluation(*, validation_passed: bool, promoted: bool) -> SimpleNamespace:
     return SimpleNamespace(
         candidate_id="strategy-1",
         validation_passed=validation_passed,
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=promoted),
     )
 

@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from atsf.backtest import BacktestResult
@@ -7,9 +8,16 @@ from atsf.promotion import PromotionPolicy, research_to_paper
 from atsf.robustness import MonteCarloResult, RegimeStabilityResult, RobustnessResult
 
 
-def evaluation(passed: bool = True) -> WalkForwardEvaluation:
+def oos_returns(daily_mean: float = 0.0012, days: int = 750, seed: int = 3) -> pd.Series:
+    rng = np.random.default_rng(seed)
+    return pd.Series(rng.normal(daily_mean, 0.01, days),
+                     index=pd.bdate_range("2022-01-03", periods=days))
+
+
+def evaluation(passed: bool = True, trades: int = 30, daily_mean: float = 0.0012) -> WalkForwardEvaluation:
     return WalkForwardEvaluation(
-        windows=(), passed=passed, oos_return=0.20, oos_sharpe=1.2, oos_drawdown=0.10
+        windows=(), passed=passed, oos_return=0.20, oos_sharpe=1.2, oos_drawdown=0.10,
+        oos_returns=oos_returns(daily_mean), oos_trade_returns=(0.01,) * trades,
     )
 
 
@@ -67,7 +75,7 @@ def test_weak_monte_carlo_blocks_paper_promotion():
     policy = PromotionPolicy(min_monte_carlo_pass_rate=0.99)
     decision = research_to_paper(evaluation(), monte_carlo(0.98), perturbation(), regime(), robustness(), policy)
     assert not decision.eligible
-    assert "Monte Carlo pass rate" in decision.reasons[0]
+    assert any("Monte Carlo pass rate" in reason for reason in decision.reasons)
 
 
 def test_weak_parameter_stability_blocks_paper_promotion():
@@ -80,3 +88,27 @@ def test_weak_regime_stability_blocks_paper_promotion():
     decision = research_to_paper(evaluation(), monte_carlo(), perturbation(), regime(-0.2), robustness())
     assert not decision.eligible
     assert "regime stability" in " ".join(decision.reasons)
+
+
+def test_too_few_oos_trades_blocks_promotion():
+    decision = research_to_paper(evaluation(trades=5), monte_carlo(), perturbation(), regime(), robustness())
+    assert not decision.eligible
+    assert any("trade count 5" in reason for reason in decision.reasons)
+
+
+def test_sharpe_that_does_not_survive_deflation_blocks_promotion():
+    """A respectable single-trial Sharpe fails once 500 variants were searched."""
+    weak = evaluation(daily_mean=0.0006)
+    alone = research_to_paper(weak, monte_carlo(), perturbation(), regime(), robustness())
+    searched = research_to_paper(weak, monte_carlo(), perturbation(), regime(), robustness(),
+                                 n_trials=500, trial_sharpe_variance=0.002)
+    assert alone.eligible
+    assert not searched.eligible
+    assert any("deflated Sharpe" in reason for reason in searched.reasons)
+
+
+def test_missing_oos_returns_fail_closed():
+    bare = WalkForwardEvaluation(windows=(), passed=True, oos_return=0.2, oos_sharpe=1.2,
+                                 oos_drawdown=0.1, oos_trade_returns=(0.01,) * 30)
+    decision = research_to_paper(bare, monte_carlo(), perturbation(), regime(), robustness())
+    assert not decision.eligible

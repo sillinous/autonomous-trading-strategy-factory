@@ -7,6 +7,7 @@ from atsf.research_cycle import ResearchCyclePolicy, run_research_cycle
 from atsf.research_provenance import build_generation_provenance
 from atsf.selection import SelectionPolicy
 from tests.test_population import make_parent_population
+from tests.fixtures import skilled_walk_forward
 
 
 def fake_evaluation(candidate):
@@ -16,7 +17,7 @@ def fake_evaluation(candidate):
         experiment=SimpleNamespace(dataset_id="dataset", dataset_version="1"),
         fitness=SimpleNamespace(score=1.0),
         backtest=SimpleNamespace(max_drawdown=0.10),
-        walk_forward=SimpleNamespace(oos_sharpe=1.2),
+        walk_forward=SimpleNamespace(oos_sharpe=1.2, oos_returns=skilled_walk_forward().oos_returns),
         monte_carlo=SimpleNamespace(pass_rate=0.90),
         perturbation=SimpleNamespace(stable=True),
         regime=SimpleNamespace(score=-0.01),
