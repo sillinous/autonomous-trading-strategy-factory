@@ -125,3 +125,28 @@ def strategy_signals(data: pd.DataFrame, strategy: StrategySpec) -> tuple[pd.Ser
         evaluate_signal(data, strategy.entry, indicators),
         evaluate_signal(data, strategy.exit, indicators),
     )
+
+
+def position_state(entry: pd.Series, exit_: pd.Series) -> pd.Series:
+    """Fold entry/exit events into a desired-position series.
+
+    On each bar an exit is applied before an entry, so a bar carrying both ends
+    the bar active. This is the single shared definition of strategy state.
+    """
+    if not entry.index.equals(exit_.index):
+        raise ValueError("entry and exit indexes must match")
+    active = False
+    values: list[bool] = []
+    for enter, leave in zip(entry.astype(bool).to_numpy(), exit_.astype(bool).to_numpy()):
+        if leave:
+            active = False
+        if enter:
+            active = True
+        values.append(active)
+    return pd.Series(values, index=entry.index, dtype=bool)
+
+
+def strategy_position(data: pd.DataFrame, strategy: StrategySpec) -> pd.Series:
+    """Desired position state for a strategy over ``data``."""
+    entry, exit_ = strategy_signals(data, strategy)
+    return position_state(entry, exit_)

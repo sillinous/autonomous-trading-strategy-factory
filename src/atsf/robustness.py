@@ -8,24 +8,12 @@ import pandas as pd
 
 from .backtest import BacktestConfig, BacktestResult, run_long_signal_backtest
 from .generator import StrategyCandidate
-from .signals import strategy_signals
+from .signals import position_state, strategy_signals
 
 DEFAULT_MONTE_CARLO_SIMULATIONS = 1000
 
 
-def _position_signal(entry: pd.Series, exit_: pd.Series) -> pd.Series:
-    """Convert entry/exit events into a persistent long-position signal."""
-    if not entry.index.equals(exit_.index):
-        raise ValueError("entry and exit indexes must match")
-    active = False
-    values: list[bool] = []
-    for timestamp in entry.index:
-        if bool(exit_.loc[timestamp]):
-            active = False
-        if bool(entry.loc[timestamp]):
-            active = True
-        values.append(active)
-    return pd.Series(values, index=entry.index, dtype=bool)
+_position_signal = position_state
 
 
 @dataclass(frozen=True)

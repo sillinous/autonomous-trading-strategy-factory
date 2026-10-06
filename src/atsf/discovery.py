@@ -6,7 +6,7 @@ import pandas as pd
 
 from .backtest import BacktestConfig, BacktestResult, run_long_signal_backtest
 from .generator import StrategyCandidate
-from .signals import strategy_signals
+from .signals import strategy_position
 from .validation import ValidationPolicy, ValidationResult, validate_equity
 
 
@@ -33,9 +33,9 @@ def evaluate_candidates(
     """Backtest and validate generated candidates without executing live orders."""
     evaluations: list[CandidateEvaluation] = []
     for candidate in candidates:
-        entry, _ = strategy_signals(data, candidate.strategy)
+        position = strategy_position(data, candidate.strategy)
         result = run_long_signal_backtest(
-            data, entry, candidate.strategy, backtest_config
+            data, position, candidate.strategy, backtest_config
         )
         validation = validate_equity(result.equity, validation_policy)
         evaluations.append(
