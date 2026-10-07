@@ -254,3 +254,21 @@ def test_full_cash_entry_never_trips_cash_check():
     quantity = min(cash / unit_cost, broker.max_affordable_quantity(price))
     broker.execute(pd.Timestamp("2024-01-02"), "buy", quantity, price)
     assert 0.0 <= broker.cash < 1e-6
+
+
+def _crash_then_trend() -> pd.DataFrame:
+    rng = np.random.default_rng(4)
+    crash = np.linspace(0, np.log(0.5), 120)                     # -50% in the train window
+    calm = np.cumsum(rng.normal(0.0008, 0.004, 480))              # steady recovery after
+    log_close = np.r_[crash, crash[-1] + calm]
+    return bars(100 * np.exp(log_close))
+
+
+def test_train_segment_is_diagnostic_by_default():
+    data = _crash_then_trend()
+    always_long = strategy()
+    default = evaluate_walk_forward(data, always_long, 300, 150, 150)
+    strict = evaluate_walk_forward(data, always_long, 300, 150, 150, require_train_pass=True)
+    assert default.train_passed is False
+    assert default.passed is True
+    assert strict.passed is False

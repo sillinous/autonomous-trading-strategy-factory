@@ -39,6 +39,27 @@ class CandidateEvaluation:
     promotion: PromotionDecision
 
 
+TRADING_YEAR = 252
+
+
+def walk_forward_plan(rows: int) -> dict:
+    """Choose walk-forward geometry for ``rows`` daily bars.
+
+    With at least six years of data, roll 3y train / 1y validation / 1y test windows
+    forward one year at a time, so OOS evidence spans every year after the first four
+    and at least 60% of windows must pass. Shorter histories fall back to a single
+    60/20/20 split where every segment must pass.
+    """
+    if rows >= 6 * TRADING_YEAR:
+        return {"train_size": 3 * TRADING_YEAR, "validation_size": TRADING_YEAR,
+                "test_size": TRADING_YEAR, "step_size": TRADING_YEAR, "min_window_pass_rate": 0.6,
+                "gate_validation": False}
+    train = max(2, int(rows * 0.6))
+    validation = max(2, int(rows * 0.2))
+    return {"train_size": train, "validation_size": validation, "test_size": rows - train - validation,
+            "step_size": None, "min_window_pass_rate": 1.0, "gate_validation": True}
+
+
 def evaluate_candidate(
     candidate: Candidate,
     data: pd.DataFrame,
@@ -59,9 +80,8 @@ def evaluate_candidate(
     if len(data) < 10:
         raise ValueError("data must contain at least 10 rows")
 
-    train_size = max(2, int(len(data) * 0.6))
-    validation_size = max(2, int(len(data) * 0.2))
-    test_size = len(data) - train_size - validation_size
+    plan = walk_forward_plan(len(data))
+    train_size, validation_size, test_size = plan["train_size"], plan["validation_size"], plan["test_size"]
     if test_size < 2:
         raise ValueError("data is too short for train/validation/OOS evaluation")
 
@@ -71,9 +91,12 @@ def evaluate_candidate(
         train_size=train_size,
         validation_size=validation_size,
         test_size=test_size,
+        step_size=plan["step_size"],
         backtest_config=backtest_config,
         validation_policy=validation_policy,
         fitness_policy=fitness_policy,
+        min_window_pass_rate=plan["min_window_pass_rate"],
+        gate_validation=plan["gate_validation"],
     )
 
     if walk_forward.oos_trade_returns:
@@ -97,9 +120,12 @@ def evaluate_candidate(
             train_size=train_size,
             validation_size=validation_size,
             test_size=test_size,
+            step_size=plan["step_size"],
             backtest_config=backtest_config,
             validation_policy=validation_policy,
             fitness_policy=fitness_policy,
+            min_window_pass_rate=plan["min_window_pass_rate"],
+            gate_validation=plan["gate_validation"],
         )
         return result.oos_sharpe
 

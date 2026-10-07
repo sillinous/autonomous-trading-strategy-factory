@@ -40,6 +40,7 @@ class FactoryRow:
     deflated_sharpe: float
     monte_carlo_pass_rate: float
     perturbation_pass_rate: float
+    train_passed: bool | None
     promoted: bool
     reasons: tuple[str, ...]
 
@@ -54,6 +55,8 @@ class FactoryReport:
     n_trials: int
     pbo: float | None
     population_overfit: bool
+    strict_pbo: bool
+    benchmark_sharpe: float | None
     rows: tuple[FactoryRow, ...]
     strategies: dict[str, dict]
 
@@ -104,8 +107,22 @@ def run_factory(
     promotion_policy: PromotionPolicy | None = None,
     max_pbo: float = 0.5,
     pbo_blocks: int = 10,
+    strict_pbo: bool = False,
+    require_benchmark: bool = True,
 ) -> FactoryReport:
-    """Generate, evaluate, deflate, and gate a strategy population on ``data``."""
+    """Generate, evaluate, deflate, and gate a strategy population on ``data``.
+
+    Multiple testing is handled by the deflated Sharpe ratio, which asks whether each
+    strategy's OOS Sharpe is real given how many were tried. PBO answers a different
+    question — whether the in-sample *ranking* survives out of sample — so it vetoes
+    rank-based survivor selection (see :func:`atsf.selection.select_population`) but,
+    for absolute-gate promotion to paper, it is reported as a warning unless
+    ``strict_pbo`` is set.
+
+    With ``require_benchmark`` (default), a strategy must also match or beat the
+    buy-and-hold Sharpe over the same OOS period: a long-only strategy that is worse
+    risk-adjusted than simply holding the asset has not earned paper capital.
+    """
     if len(data) < 500:
         raise ValueError("the factory needs at least 500 bars for meaningful OOS evidence")
     strategies = strategies or default_strategies(symbol)
@@ -120,6 +137,14 @@ def run_factory(
     n_trials, variance = population_trial_statistics(evaluations)
     overfitting = population_overfitting(evaluations, pbo_blocks)
     overfit = overfitting is not None and overfitting.pbo > max_pbo
+    veto = overfit and strict_pbo
+
+    benchmark_sharpe = None
+    oos_index = next((e.walk_forward.oos_returns.index for e in evaluations
+                      if e.walk_forward.oos_returns is not None), None)
+    if oos_index is not None:
+        hold = data["close"].pct_change().reindex(oos_index).dropna()
+        benchmark_sharpe = _annualized_sharpe(hold, strategies[0].timeframe)
 
     rows: list[FactoryRow] = []
     for candidate, evaluation in zip(candidates, evaluations):
@@ -129,22 +154,28 @@ def run_factory(
             n_trials=n_trials, trial_sharpe_variance=variance,
         )
         reasons = list(decision.reasons)
-        if overfit:
+        if veto:
             reasons.append(f"population PBO {overfitting.pbo:.2f} exceeds {max_pbo:.2f}")
         returns = evaluation.walk_forward.oos_returns
+        oos_sharpe = _annualized_sharpe(returns, candidate.strategy.timeframe)
+        below_benchmark = (require_benchmark and benchmark_sharpe is not None
+                           and oos_sharpe < benchmark_sharpe)
+        if below_benchmark:
+            reasons.append(f"OOS Sharpe {oos_sharpe:.2f} is below buy-and-hold {benchmark_sharpe:.2f}")
         inference = deflated_sharpe_ratio(() if returns is None else returns, n_trials, variance)
         rows.append(FactoryRow(
             strategy_id=candidate.strategy_id,
             name=candidate.strategy.name,
             family=_family(candidate.strategy),
             oos_return=float(evaluation.walk_forward.oos_return),
-            oos_sharpe=_annualized_sharpe(returns, candidate.strategy.timeframe),
+            oos_sharpe=oos_sharpe,
             oos_drawdown=float(evaluation.walk_forward.oos_drawdown),
             oos_trades=len(evaluation.walk_forward.oos_trade_returns),
             deflated_sharpe=float(inference.probability),
             monte_carlo_pass_rate=float(evaluation.monte_carlo.pass_rate),
             perturbation_pass_rate=float(evaluation.perturbation.pass_rate),
-            promoted=decision.eligible and not overfit,
+            train_passed=evaluation.walk_forward.train_passed,
+            promoted=decision.eligible and not veto and not below_benchmark,
             reasons=tuple(reasons),
         ))
     rows.sort(key=lambda row: (row.promoted, row.deflated_sharpe, row.oos_sharpe), reverse=True)
@@ -157,6 +188,8 @@ def run_factory(
         n_trials=n_trials,
         pbo=None if overfitting is None else float(overfitting.pbo),
         population_overfit=overfit,
+        strict_pbo=strict_pbo,
+        benchmark_sharpe=benchmark_sharpe,
         rows=tuple(rows),
         strategies={c.strategy_id: c.strategy.model_dump(mode="json") for c in candidates},
     )
