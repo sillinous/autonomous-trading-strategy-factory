@@ -40,9 +40,15 @@ def test_factory_evaluates_every_generated_strategy(report):
     assert all(0.0 <= row.deflated_sharpe <= 1.0 for row in report.rows)
 
 
-def test_factory_never_promotes_from_an_overfit_population(report):
-    if report.population_overfit:
-        assert not report.promoted
+def test_strict_pbo_blocks_promotion_from_an_overfit_population(market_csv, report):
+    strict = run_factory(load_market_data("TEST", csv=str(market_csv)), "TEST",
+                         perturbation_samples=3, strict_pbo=True, max_pbo=0.01)
+    if strict.population_overfit:
+        assert not strict.promoted
+        assert all(any("PBO" in r for r in row.reasons) for row in strict.rows)
+
+
+def test_rejections_always_carry_reasons(report):
     for row in report.rows:
         if not row.promoted:
             assert row.reasons
@@ -125,3 +131,14 @@ def test_yahoo_payload_is_adjusted(monkeypatch):
     records = envelope.payload["records"]
     assert [r["close"] for r in records] == [50.0, 51.0]
     assert records[0]["open"] == pytest.approx(50.0)
+
+
+def test_benchmark_gate(market_csv, report):
+    assert report.benchmark_sharpe is not None
+    for row in report.rows:
+        if row.oos_sharpe < report.benchmark_sharpe:
+            assert not row.promoted
+            assert any("buy-and-hold" in reason for reason in row.reasons)
+    relaxed = run_factory(load_market_data("TEST", csv=str(market_csv)), "TEST",
+                          perturbation_samples=3, require_benchmark=False)
+    assert not any("buy-and-hold" in r for row in relaxed.rows for r in row.reasons)

@@ -70,21 +70,26 @@ def format_report(report: FactoryReport) -> str:
         f"data {report.dataset_version})",
         f"trials {report.n_trials}   PBO "
         + ("n/a" if report.pbo is None else f"{report.pbo:.2f}")
-        + ("  ⚠ population overfit" if report.population_overfit else ""),
+        + (("  ✗ population overfit (strict: no promotions)" if report.strict_pbo
+            else "  ⚠ IS ranking unreliable; promotions rest on absolute gates")
+           if report.population_overfit else ""),
         "",
-        f"{'family':<20}{'OOS ret':>9}{'Sharpe':>8}{'MaxDD':>8}{'trades':>8}{'DSR':>7}  status",
+        f"{'family':<20}{'OOS ret':>9}{'Sharpe':>8}{'MaxDD':>8}{'trades':>8}{'DSR':>7}{'IS':>4}  status",
     ]
     for row in report.rows:
         status = "PROMOTE → paper" if row.promoted else "reject"
         lines.append(
             f"{row.family:<20}{_pct(row.oos_return):>9}{row.oos_sharpe:>8.2f}"
-            f"{_pct(-row.oos_drawdown):>8}{row.oos_trades:>8}{row.deflated_sharpe:>7.2f}  {status}"
+            f"{_pct(-row.oos_drawdown):>8}{row.oos_trades:>8}{row.deflated_sharpe:>7.2f}"
+            f"{'✓' if row.train_passed else '✗':>4}  {status}"
         )
         if not row.promoted and row.reasons:
             more = f"  (+{len(row.reasons) - 1} more)" if len(row.reasons) > 1 else ""
             lines.append(f"{'':<20}└ {row.reasons[0]}{more}")
     promoted = report.promoted
     lines += ["", f"{len(promoted)} of {len(report.rows)} strategies promoted to paper."]
+    if report.benchmark_sharpe is not None:
+        lines.append(f"buy & hold Sharpe over the same OOS years: {report.benchmark_sharpe:.2f}")
     return "\n".join(lines)
 
 
@@ -129,7 +134,8 @@ def _cmd_research(args: argparse.Namespace) -> int:
     data = load_market_data(args.symbol, source=args.source, start=args.start, end=args.end,
                             csv=args.csv)
     report = run_factory(data, args.symbol.upper(), seed=args.seed,
-                         perturbation_samples=args.perturbations)
+                         perturbation_samples=args.perturbations, strict_pbo=args.strict_pbo,
+                         require_benchmark=not args.allow_below_benchmark)
     print(format_report(report))
     if args.json:
         Path(args.json).write_text(json.dumps(report.to_dict(), indent=2, default=str))
@@ -168,6 +174,10 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--seed", type=int, default=0)
     research.add_argument("--perturbations", type=int, default=12)
     research.add_argument("--json", help="write the full report as JSON")
+    research.add_argument("--strict-pbo", action="store_true",
+                          help="block all promotions when population PBO exceeds 0.5")
+    research.add_argument("--allow-below-benchmark", action="store_true",
+                          help="promote strategies whose OOS Sharpe trails buy-and-hold")
     research.set_defaults(func=_cmd_research)
     return parser
 
