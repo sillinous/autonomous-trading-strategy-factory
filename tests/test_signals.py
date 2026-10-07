@@ -46,4 +46,4 @@ def test_strategy_signals_resolve_indicator_names():
 
 def test_unknown_indicator_is_rejected_at_dsl_boundary():
     with pytest.raises(ValueError, match="indicator kind is required"):
-        Indicator(name="macd", period=12)
+        Indicator(name="ichimoku", period=12)

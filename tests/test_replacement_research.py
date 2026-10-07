@@ -37,11 +37,14 @@ def test_replacement_research_generates_typed_successors_with_lineage():
         request_store=store,
         registry=registry,
     )
-    assert len(result.candidates) == 3
-    assert len(result.strategy_ids) == 3
+    from atsf.generator import ARCHETYPES
+
+    expected = 3 + len(ARCHETYPES)  # moving-average variants plus every archetype
+    assert len(result.candidates) == expected
+    assert len(result.strategy_ids) == expected
     assert all(candidate.request_id == original.request_id for candidate in result.candidates)
     assert all(candidate.parent_strategy_id == original.source_strategy_id for candidate in result.candidates)
-    assert len({candidate.candidate_id for candidate in result.candidates}) == 3
+    assert len({candidate.candidate_id for candidate in result.candidates}) == expected
     assert all(candidate.strategy.universe == ["TEST"] for candidate in result.candidates)
     for strategy_identifier in result.strategy_ids:
         lineage = registry.get_lineage(strategy_identifier)
@@ -63,6 +66,9 @@ def test_replacement_constraints_are_honored():
     )
     store.save(constrained)
     result = generate_replacements(constrained, ["TEST"], request_store=store)
-    assert len(result.candidates) == 2
+    from atsf.generator import ARCHETYPES
+
+    trend = sum(1 for style, *_ in ARCHETYPES.values() if style == "trend")
+    assert len(result.candidates) == 2 + trend
     assert all(candidate.mutation != "sma_slow" for candidate in result.candidates)
     registry.close()
