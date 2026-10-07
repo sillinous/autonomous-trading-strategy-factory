@@ -15,7 +15,8 @@ from .portfolio_paper import PortfolioPaperResult, run_paper_portfolio
 from .portfolio_run import PortfolioRunIdentity, attribute_run, build_portfolio_run_identity
 from .promotion import PromotionDecision
 from .registry import ExperimentRegistry
-from .signals import strategy_signals
+from .execution import run_sleeve
+from .signals import strategy_position, strategy_signals
 
 
 @dataclass(frozen=True)
@@ -27,28 +28,13 @@ class PersistedPortfolioExecution:
 
 
 def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commission_bps: float, slippage_bps: float) -> pd.Series:
-    """Replay one sleeve with the same deterministic paper broker for attribution."""
+    """Replay one sleeve in isolation on the shared execution engine for attribution."""
     close = pd.to_numeric(frame["close"], errors="coerce")
     if frame.empty or close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
         raise ValueError("attribution data must contain finite positive close prices")
     broker = PaperBroker(PaperConfig(initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps))
-    entry, exit_ = strategy_signals(frame, strategy)
-    equity: list[float] = []
-    for timestamp in frame.index:
-        price = float(close.loc[timestamp])
-        if bool(entry.loc[timestamp]) and broker.position == 0:
-            desired = broker.cash * strategy.position_sizing.max_position / price
-            quantity = min(desired, broker.max_affordable_quantity(price))
-            if quantity > 0:
-                broker.execute(timestamp, "buy", quantity, price)
-        elif bool(exit_.loc[timestamp]) and broker.position > 0:
-            broker.execute(timestamp, "sell", broker.position, price)
-        equity.append(broker.mark(timestamp, price).equity)
-    if broker.position > 0:
-        timestamp = frame.index[-1]
-        broker.execute(timestamp, "sell", broker.position, float(close.iloc[-1]))
-        equity[-1] = broker.mark(timestamp, float(close.iloc[-1])).equity
-    return pd.Series(equity, index=frame.index, dtype=float).pct_change().fillna(0.0)
+    engine = run_sleeve(strategy, frame, strategy_position(frame, strategy), broker, liquidate_at_end=True)
+    return pd.Series(engine.equity, index=frame.index, dtype=float).pct_change().fillna(0.0)
 
 
 def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, data: dict[str, pd.DataFrame], *, dataset_version: str, initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None) -> PersistedPortfolioExecution:
@@ -93,9 +79,9 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
     signals = {strategy_id: strategy_signals(data[strategy_id], strategies[strategy_id]) for strategy_id in strategies}
-    liquidation_timestamp = paper.snapshots[-1].timestamp if paper.halted and paper.snapshots else None
-    lineage = build_fill_lineage(audit_events, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp)
-    if not verify_fill_lineage(audit_events, lineage, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp): raise ValueError("deterministic fill-lineage verification failed")
+    liquidation_timestamp = paper.liquidation_timestamp
+    lineage = build_fill_lineage(audit_events, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp, risk_exits=paper.risk_exits)
+    if not verify_fill_lineage(audit_events, lineage, signals, halted=paper.halted, liquidation_timestamp=liquidation_timestamp, risk_exits=paper.risk_exits): raise ValueError("deterministic fill-lineage verification failed")
     manifest = execution_manifest(audit_events)
     persisted_execution_config = {**execution_config, "ledger_fingerprint": manifest.ledger_fingerprint, "ledger_event_count": manifest.event_count, "fill_lineage": [{"event_id": item.event_id, "decision_id": item.decision_id, "reason": item.reason} for item in lineage]}
     store.save_portfolio_execution(identity.run_id, portfolio_id, paper.final_equity, paper.halted, paper.halt_reason, [{"strategy_id": item.strategy_id, "return_contribution": item.return_contribution, "risk_contribution": item.risk_contribution} for item in attribution.contributions], dataset_id=persisted_dataset_id, dataset_version=dataset_version, data_bundle_version=bundle.version, execution_fingerprint=identity.execution_fingerprint, execution_config=persisted_execution_config, audit_events=list(audit_events))

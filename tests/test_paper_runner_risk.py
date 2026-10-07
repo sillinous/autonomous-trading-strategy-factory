@@ -26,9 +26,13 @@ def make_strategy(max_drawdown=None):
 
 def test_paper_runner_halts_when_drawdown_limit_breaches():
     data = pd.DataFrame(
-        {"close": [100, 100, 120, 70, 60]},
-        index=pd.date_range("2025-01-01", periods=5),
+        # Entry decided at 120 fills on the next bar (121); the crash to 70 then breaches.
+        {"close": [100, 100, 120, 121, 70, 60]},
+        index=pd.date_range("2025-01-01", periods=6),
     )
     result = run_paper_strategy(data, make_strategy(max_drawdown=0.10))
     assert result.halted
     assert result.halt_reason == "maximum drawdown breached"
+    assert result.fills[-1].side == "sell"
+    assert result.events[-1].reason == "max_drawdown"
+    assert result.snapshots[-1].position == 0

@@ -82,9 +82,10 @@ def test_portfolio_paper_runner_rejects_misaligned_timestamps():
 
 
 def test_portfolio_paper_runner_liquidates_on_risk_halt():
-    index = pd.date_range("2025-01-01", periods=5)
+    # Entry decided at 110 fills on the next bar (111); the crash to 50 breaches 10%.
+    index = pd.date_range("2025-01-01", periods=6)
     data = {
-        "a": pd.DataFrame({"close": [100, 100, 100, 50, 50]}, index=index),
+        "a": pd.DataFrame({"close": [100, 100, 110, 111, 50, 50]}, index=index),
     }
     result = run_paper_portfolio(
         data,
@@ -99,3 +100,14 @@ def test_portfolio_paper_runner_liquidates_on_risk_halt():
     assert result.fills[-1][0] == "a"
     assert result.fills[-1][1].side == "sell"
     assert result.final_equity > 0
+    assert result.liquidation_timestamp == index[5]
+    assert result.events[-1][1].reason == "risk_halt"
+    assert result.events[-1][1].decision_timestamp == index[4]  # breach observed at that close
+
+
+def test_portfolio_sleeves_only_enter_on_signals():
+    index = pd.date_range("2025-01-01", periods=5)
+    data = {"a": pd.DataFrame({"close": [100, 100, 100, 100, 100]}, index=index)}
+    result = run_paper_portfolio(data, {"a": make_strategy("a")}, {"a": 1.0}, decisions={"a": approved()})
+    assert result.fills == ()
+    assert result.final_equity == pytest.approx(100_000)
