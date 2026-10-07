@@ -1,0 +1,175 @@
+"""End-to-end research factory: data in, ranked and gated strategies out.
+
+``run_factory`` is the single front door used by the CLI and API. It generates a
+candidate population, evaluates every candidate through the same deterministic gates
+used everywhere else (walk-forward OOS, Monte Carlo, parameter perturbation, regime,
+execution robustness), then applies population-level multiple-testing corrections:
+each candidate's promotion decision is re-made with the true trial count and the
+population's cross-sectional Sharpe variance, and the whole population is checked
+for backtest overfitting (PBO). It never places orders.
+"""
+from __future__ import annotations
+
+import hashlib
+import math
+from dataclasses import asdict, dataclass
+
+import numpy as np
+import pandas as pd
+
+from .execution import PERIODS_PER_YEAR
+from .generator import ARCHETYPES, StrategyGenerator
+from .orchestrator import CandidateEvaluation, evaluate_candidate
+from .population import seed_population
+from .promotion import PromotionPolicy, research_to_paper
+from .research_queue import ResearchReason, ResearchRequest
+from .selection import population_overfitting, population_trial_statistics
+from .statistics import deflated_sharpe_ratio
+from .strategy import StrategySpec
+
+
+@dataclass(frozen=True)
+class FactoryRow:
+    strategy_id: str
+    name: str
+    family: str
+    oos_return: float
+    oos_sharpe: float
+    oos_drawdown: float
+    oos_trades: int
+    deflated_sharpe: float
+    monte_carlo_pass_rate: float
+    perturbation_pass_rate: float
+    promoted: bool
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FactoryReport:
+    symbol: str
+    dataset_version: str
+    start: str
+    end: str
+    bars: int
+    n_trials: int
+    pbo: float | None
+    population_overfit: bool
+    rows: tuple[FactoryRow, ...]
+    strategies: dict[str, dict]
+
+    @property
+    def promoted(self) -> tuple[FactoryRow, ...]:
+        return tuple(row for row in self.rows if row.promoted)
+
+    def to_dict(self) -> dict:
+        payload = asdict(self)
+        payload["rows"] = [asdict(row) for row in self.rows]
+        return payload
+
+
+def dataset_fingerprint(data: pd.DataFrame) -> str:
+    """Content hash of the exact bars evaluated."""
+    canonical = data.sort_index().to_csv(float_format="%.10g").encode()
+    return hashlib.sha256(canonical).hexdigest()[:16]
+
+
+def default_strategies(symbol: str) -> list[StrategySpec]:
+    request = ResearchRequest(f"factory-{symbol.lower()}", None, ResearchReason.DIVERSIFICATION, 1)
+    return [candidate.strategy for candidate in StrategyGenerator().generate(request, [symbol])]
+
+
+MA_VARIANTS = ("sma_fast", "ema_fast", "sma_slow")
+
+
+def _family(strategy: StrategySpec) -> str:
+    for name in (*ARCHETYPES, *MA_VARIANTS):
+        if strategy.name.endswith(name):
+            return name if name in ARCHETYPES else f"ma_cross_{name}"
+    return "custom"
+
+
+def _annualized_sharpe(returns: pd.Series | None, timeframe: str) -> float:
+    if returns is None or len(returns) < 3 or float(returns.std(ddof=1)) == 0:
+        return 0.0
+    return float(returns.mean() / returns.std(ddof=1) * math.sqrt(PERIODS_PER_YEAR[timeframe]))
+
+
+def run_factory(
+    data: pd.DataFrame,
+    symbol: str,
+    *,
+    strategies: list[StrategySpec] | None = None,
+    seed: int = 0,
+    perturbation_samples: int = 12,
+    promotion_policy: PromotionPolicy | None = None,
+    max_pbo: float = 0.5,
+    pbo_blocks: int = 10,
+) -> FactoryReport:
+    """Generate, evaluate, deflate, and gate a strategy population on ``data``."""
+    if len(data) < 500:
+        raise ValueError("the factory needs at least 500 bars for meaningful OOS evidence")
+    strategies = strategies or default_strategies(symbol)
+    candidates = seed_population(strategies)
+    version = dataset_fingerprint(data)
+    evaluations: list[CandidateEvaluation] = [
+        evaluate_candidate(candidate, data, symbol, version, seed=seed + offset,
+                           promotion_policy=promotion_policy,
+                           perturbation_samples=perturbation_samples)
+        for offset, candidate in enumerate(candidates)
+    ]
+    n_trials, variance = population_trial_statistics(evaluations)
+    overfitting = population_overfitting(evaluations, pbo_blocks)
+    overfit = overfitting is not None and overfitting.pbo > max_pbo
+
+    rows: list[FactoryRow] = []
+    for candidate, evaluation in zip(candidates, evaluations):
+        decision = research_to_paper(
+            evaluation.walk_forward, evaluation.monte_carlo, evaluation.perturbation,
+            evaluation.regime, evaluation.robustness, promotion_policy,
+            n_trials=n_trials, trial_sharpe_variance=variance,
+        )
+        reasons = list(decision.reasons)
+        if overfit:
+            reasons.append(f"population PBO {overfitting.pbo:.2f} exceeds {max_pbo:.2f}")
+        returns = evaluation.walk_forward.oos_returns
+        inference = deflated_sharpe_ratio(() if returns is None else returns, n_trials, variance)
+        rows.append(FactoryRow(
+            strategy_id=candidate.strategy_id,
+            name=candidate.strategy.name,
+            family=_family(candidate.strategy),
+            oos_return=float(evaluation.walk_forward.oos_return),
+            oos_sharpe=_annualized_sharpe(returns, candidate.strategy.timeframe),
+            oos_drawdown=float(evaluation.walk_forward.oos_drawdown),
+            oos_trades=len(evaluation.walk_forward.oos_trade_returns),
+            deflated_sharpe=float(inference.probability),
+            monte_carlo_pass_rate=float(evaluation.monte_carlo.pass_rate),
+            perturbation_pass_rate=float(evaluation.perturbation.pass_rate),
+            promoted=decision.eligible and not overfit,
+            reasons=tuple(reasons),
+        ))
+    rows.sort(key=lambda row: (row.promoted, row.deflated_sharpe, row.oos_sharpe), reverse=True)
+    return FactoryReport(
+        symbol=symbol,
+        dataset_version=version,
+        start=data.index[0].isoformat(),
+        end=data.index[-1].isoformat(),
+        bars=len(data),
+        n_trials=n_trials,
+        pbo=None if overfitting is None else float(overfitting.pbo),
+        population_overfit=overfit,
+        rows=tuple(rows),
+        strategies={c.strategy_id: c.strategy.model_dump(mode="json") for c in candidates},
+    )
+
+
+def summarize_backtest(equity: pd.Series, timeframe: str = "1d") -> dict[str, float]:
+    returns = equity.pct_change().dropna()
+    years = max(len(returns) / PERIODS_PER_YEAR[timeframe], 1e-9)
+    total = float(equity.iloc[-1] / equity.iloc[0] - 1.0)
+    return {
+        "total_return": total,
+        "cagr": float((1.0 + total) ** (1.0 / years) - 1.0) if total > -1 else -1.0,
+        "sharpe": _annualized_sharpe(returns, timeframe),
+        "max_drawdown": float((equity / equity.cummax() - 1.0).min()),
+        "exposure": float(np.mean(returns != 0)) if len(returns) else 0.0,
+    }

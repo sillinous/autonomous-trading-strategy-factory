@@ -242,3 +242,15 @@ def test_walk_forward_signals_match_full_history_without_lookahead():
     full = strategy_position(data, spec)
     truncated = strategy_position(data.iloc[:1500], spec)
     assert full.iloc[:1500].equals(truncated)
+
+
+def test_full_cash_entry_never_trips_cash_check():
+    """Regression: a 100% entry on six-figure cash overran an absolute 1e-12 cash check."""
+    from atsf.paper import PaperBroker, PaperConfig
+
+    cash, price = 909127.3192399365, 130.88147259022466  # found by search; failed before fix
+    broker = PaperBroker(PaperConfig(cash, 1.0, 2.0))
+    unit_cost = price * (1 + 2 / 1e4) * (1 + 1 / 1e4)
+    quantity = min(cash / unit_cost, broker.max_affordable_quantity(price))
+    broker.execute(pd.Timestamp("2024-01-02"), "buy", quantity, price)
+    assert 0.0 <= broker.cash < 1e-6

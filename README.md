@@ -2,6 +2,28 @@
 
 An experimental platform for autonomous quantitative strategy research, historical backtesting, robustness validation, and eventual paper/live execution.
 
+## Quick start
+
+```bash
+pip install -e ".[dev]"
+atsf archetypes                                   # list built-in strategy archetypes
+atsf data SPY --start 2005-01-01 --out spy.csv    # split/dividend-adjusted daily bars (Yahoo)
+atsf backtest SPY --csv spy.csv --archetype roc_momentum
+atsf research SPY --csv spy.csv --json report.json
+```
+
+`atsf research` generates the candidate population (moving-average variants plus the
+breakout, momentum, MACD, RSI and Bollinger archetypes), evaluates each one through
+walk-forward OOS testing, Monte Carlo, parameter perturbation, regime and execution
+robustness, then applies population-level overfitting controls: every promotion
+decision is re-made with the deflated Sharpe ratio for the true number of trials, and
+the population is rejected outright if its probability of backtest overfitting
+(PBO, via CSCV) exceeds 0.5. Promotion only ever reaches the paper stage.
+
+Execution is identical everywhere: backtests, paper runs, portfolio sleeves and
+persisted-run replay all step one engine (`atsf.execution`) with next-bar fills,
+adverse slippage, volatility-targeted sizing, intrabar stops and a drawdown kill switch.
+
 ## Design principles
 
 - Strategies are represented as typed, serializable specifications rather than arbitrary generated code.
