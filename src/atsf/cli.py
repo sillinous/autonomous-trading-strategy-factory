@@ -133,7 +133,27 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
 def _cmd_research(args: argparse.Namespace) -> int:
     data = load_market_data(args.symbol, source=args.source, start=args.start, end=args.end,
                             csv=args.csv)
-    report = run_factory(data, args.symbol.upper(), seed=args.seed,
+    symbol = args.symbol.upper()
+    strategies = None
+    if args.propose:
+        from .factory import default_strategies
+        from .proposer import ClaudeProposer
+
+        history = None
+        if args.history:
+            prior = json.loads(Path(args.history).read_text())
+            history = [{"family": r["family"], "oos_sharpe": round(r["oos_sharpe"], 2),
+                        "oos_trades": r["oos_trades"], "promoted": r["promoted"],
+                        "reasons": r["reasons"][:2]} for r in prior.get("rows", [])]
+        batch = ClaudeProposer().propose(symbol, data, args.propose, history)
+        for proposal in batch.proposals:
+            mark = "✓" if proposal.accepted else "✗"
+            name = proposal.strategy.name if proposal.strategy else "?"
+            print(f"{mark} {name}: {proposal.rationale or proposal.reason}"
+                  + ("" if proposal.accepted else f"  [{proposal.reason}]"))
+        print(f"{len(batch.accepted)} of {len(batch.proposals)} proposals admitted ({batch.model})\n")
+        strategies = default_strategies(symbol) + batch.accepted
+    report = run_factory(data, symbol, strategies=strategies, seed=args.seed,
                          perturbation_samples=args.perturbations, strict_pbo=args.strict_pbo,
                          require_benchmark=not args.allow_below_benchmark)
     print(format_report(report))
@@ -176,6 +196,9 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--json", help="write the full report as JSON")
     research.add_argument("--strict-pbo", action="store_true",
                           help="block all promotions when population PBO exceeds 0.5")
+    research.add_argument("--propose", type=int, default=0, metavar="N",
+                          help="also test N strategies proposed by Claude (needs ANTHROPIC_API_KEY)")
+    research.add_argument("--history", help="prior --json report to show the proposer")
     research.add_argument("--allow-below-benchmark", action="store_true",
                           help="promote strategies whose OOS Sharpe trails buy-and-hold")
     research.set_defaults(func=_cmd_research)

@@ -85,6 +85,8 @@ MA_VARIANTS = ("sma_fast", "ema_fast", "sma_slow")
 
 
 def _family(strategy: StrategySpec) -> str:
+    if strategy.metadata.get("origin") == "claude":
+        return f"claude:{strategy.name}"[:19]
     for name in (*ARCHETYPES, *MA_VARIANTS):
         if strategy.name.endswith(name):
             return name if name in ARCHETYPES else f"ma_cross_{name}"
