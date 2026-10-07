@@ -58,6 +58,7 @@ class ExternalDataGateway:
         return {
             "market": {
                 "alphavantage": {"configured": bool(os.getenv("ALPHAVANTAGE_API_KEY")), "capabilities": ["daily_ohlcv", "news_sentiment"]},
+                "yahoo": {"configured": True, "capabilities": ["daily_ohlcv"], "adjusted": True},
                 "stooq": {"configured": True, "capabilities": ["daily_ohlcv"]},
             },
             "macro": {
@@ -78,10 +79,14 @@ class ExternalDataGateway:
             if not key:
                 raise RuntimeError("ALPHAVANTAGE_API_KEY is not configured")
             frame = AlphaVantageDailyProvider(key, timeout=self.timeout).load(symbol, start, end)
+        elif source == "yahoo":
+            frame = self._yahoo_daily(symbol, start, end)
         elif source == "stooq":
             query = urlencode({"s": symbol.lower(), "d1": start.strftime("%Y%m%d") if start else None, "d2": end.strftime("%Y%m%d") if end else None, "i": "d"})
             query = query.replace("d1=None&", "").replace("d2=None&", "")
             raw = self._get(f"https://stooq.com/q/d/l/?{query}", user_agent="atsf/0.1 market-data")
+            if raw.lstrip()[:1] == b"<":
+                raise RuntimeError("Stooq returned an HTML bot challenge instead of CSV; use source='yahoo'")
             frame = pd.read_csv(io.BytesIO(raw))
             frame = frame.rename(columns={c: c.lower() for c in frame.columns})
             if "date" not in frame.columns:
@@ -111,6 +116,37 @@ class ExternalDataGateway:
             ],
         }
         return self._envelope(source, "daily_ohlcv", payload)
+
+    def _yahoo_daily(self, symbol: str, start=None, end=None) -> pd.DataFrame:
+        """Split- and dividend-adjusted daily OHLCV from Yahoo's public chart endpoint."""
+        period1 = int(pd.Timestamp(start or "1990-01-01").timestamp())
+        period2 = int(pd.Timestamp(end).timestamp()) if end else int(pd.Timestamp.now(tz="UTC").timestamp())
+        query = urlencode({"period1": period1, "period2": period2, "interval": "1d",
+                           "events": "div,split"})
+        raw = self._get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?{query}",
+                        user_agent="Mozilla/5.0 (compatible; atsf/0.1)")
+        chart = json.loads(raw).get("chart", {})
+        if chart.get("error") or not chart.get("result"):
+            raise ValueError(f"Yahoo returned no data for {symbol}: {chart.get('error')}")
+        result = chart["result"][0]
+        quote = result["indicators"]["quote"][0]
+        timezone = result.get("meta", {}).get("exchangeTimezoneName", "America/New_York")
+        index = pd.to_datetime(result["timestamp"], unit="s", utc=True).tz_convert(timezone)
+        frame = pd.DataFrame({key: quote[key] for key in ("open", "high", "low", "close", "volume")},
+                             index=index.tz_localize(None).normalize())
+        adjclose = result["indicators"].get("adjclose", [{}])[0].get("adjclose")
+        frame = frame.dropna(subset=["open", "high", "low", "close"])
+        if adjclose is not None:
+            factor = pd.Series(adjclose, index=index.tz_localize(None).normalize()).reindex(frame.index) / frame["close"]
+            for column in ("open", "high", "low", "close"):
+                frame[column] = frame[column] * factor
+        frame["volume"] = frame["volume"].fillna(0.0).astype(float)
+        frame = frame[~frame.index.duplicated(keep="last")].sort_index()
+        frame.index.name = "date"
+        frame = validate_market_data(frame)
+        if frame.empty:
+            raise ValueError("requested market-data range is empty")
+        return frame
 
     def fred_series(self, series_id: str, *, start=None, end=None) -> ExternalDataEnvelope:
         series_id = series_id.strip().upper()

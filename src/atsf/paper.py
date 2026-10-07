@@ -70,9 +70,10 @@ class PaperBroker:
         fee = fill_price * quantity * self.config.commission_bps / 10_000.0
         if side == "buy":
             required = fill_price * quantity + fee
-            if required > self.cash + 1e-12:
+            # Tolerance is relative: float rounding on a full-cash buy scales with cash.
+            if required > self.cash * (1.0 + 1e-12) + 1e-12:
                 raise ValueError("insufficient paper cash")
-            self.cash -= required
+            self.cash = max(0.0, self.cash - required)
             self.position += quantity
         else:
             if quantity > self.position + 1e-12:
