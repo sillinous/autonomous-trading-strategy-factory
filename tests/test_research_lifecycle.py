@@ -11,12 +11,14 @@ from atsf.research_lifecycle import (
 )
 from atsf.scheduler import GenerationResult
 from atsf.research import ResearchRunResult
+from tests.fixtures import skilled_walk_forward
 
 
 def _evaluation(strategy_id: str, *, validation_passed: bool, promotion_eligible: bool) -> SimpleNamespace:
     return SimpleNamespace(
         candidate_id=strategy_id,
         validation_passed=validation_passed,
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=promotion_eligible),
     )
 

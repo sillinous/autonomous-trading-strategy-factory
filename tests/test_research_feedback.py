@@ -4,12 +4,14 @@ import pytest
 
 from atsf.research_feedback import build_research_feedback
 from atsf.research_queue import ResearchReason
+from tests.fixtures import skilled_walk_forward
 
 
 def _evaluation(candidate_id="s1", *, valid=True, eligible=True, simulations=100, pass_rate=0.95, fitness=0.7, robust=True):
     return SimpleNamespace(
         candidate_id=candidate_id,
         validation_passed=valid,
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=eligible),
         monte_carlo=SimpleNamespace(simulations=simulations, pass_rate=pass_rate),
         fitness=SimpleNamespace(score=fitness),

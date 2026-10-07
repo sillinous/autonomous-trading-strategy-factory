@@ -6,6 +6,7 @@ from math import isfinite
 from .evaluation import WalkForwardEvaluation
 from .perturbation import PerturbationResult
 from .robustness import MonteCarloResult, RegimeStabilityResult, RobustnessResult
+from .statistics import deflated_sharpe_ratio
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,8 @@ class PromotionPolicy:
     min_robustness_equity_ratio: float = 0.90
     require_walk_forward_pass: bool = True
     require_robustness: bool = True
+    min_oos_trades: int = 20
+    min_deflated_sharpe: float = 0.95
 
 
 @dataclass(frozen=True)
@@ -35,13 +38,25 @@ def research_to_paper(
     regime: RegimeStabilityResult | None = None,
     robustness: RobustnessResult | None = None,
     policy: PromotionPolicy | None = None,
+    *,
+    n_trials: int = 1,
+    trial_sharpe_variance: float | None = None,
 ) -> PromotionDecision:
+    """Gate a strategy from research to paper.
+
+    ``n_trials`` is the number of strategy variants evaluated to find this one; the OOS
+    Sharpe must survive deflation for that many trials (see :mod:`atsf.statistics`).
+    """
     if isinstance(robustness, PromotionPolicy) and policy is None:
         policy = robustness
         robustness = None
     policy = policy or PromotionPolicy()
     if not 0 < policy.min_robustness_equity_ratio <= 1:
         raise ValueError("min_robustness_equity_ratio must be in (0, 1]")
+    if policy.min_oos_trades < 0 or not 0 <= policy.min_deflated_sharpe < 1:
+        raise ValueError("min_oos_trades must be >= 0 and min_deflated_sharpe in [0, 1)")
+    if n_trials < 1:
+        raise ValueError("n_trials must be at least 1")
 
     reasons: list[str] = []
     finite_metrics = (
@@ -58,6 +73,21 @@ def research_to_paper(
         reasons.append("OOS Sharpe is below the promotion minimum")
     if evaluation.oos_drawdown > policy.max_oos_drawdown:
         reasons.append("OOS drawdown exceeds the promotion maximum")
+    if len(evaluation.oos_trade_returns) < policy.min_oos_trades:
+        reasons.append(
+            f"OOS trade count {len(evaluation.oos_trade_returns)} is below the minimum "
+            f"{policy.min_oos_trades}"
+        )
+    if policy.min_deflated_sharpe > 0:
+        returns = evaluation.oos_returns
+        inference = deflated_sharpe_ratio(
+            () if returns is None else returns, n_trials, trial_sharpe_variance
+        )
+        if inference.probability < policy.min_deflated_sharpe:
+            reasons.append(
+                f"deflated Sharpe probability {inference.probability:.3f} over {n_trials} "
+                f"trial(s) is below {policy.min_deflated_sharpe:.3f}"
+            )
     if monte_carlo.pass_rate < policy.min_monte_carlo_pass_rate:
         reasons.append("Monte Carlo pass rate is below the promotion minimum")
     if monte_carlo.lower_percentile_return < policy.min_monte_carlo_lower_return:

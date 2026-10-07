@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from atsf.selection import SelectionPolicy, pareto_front, select_population
+from tests.fixtures import skilled_walk_forward
 
 
 def evaluation(candidate_id: str, score: float, drawdown: float = 0.10, pass_rate: float = 0.90, robustness: float = 0.95, regime: float = -0.01, eligible: bool = True):
@@ -20,6 +21,7 @@ def evaluation(candidate_id: str, score: float, drawdown: float = 0.10, pass_rat
         monte_carlo=SimpleNamespace(pass_rate=pass_rate),
         regime=SimpleNamespace(score=regime),
         robustness=robustness_result,
+        walk_forward=skilled_walk_forward(),
         promotion=SimpleNamespace(eligible=eligible),
         validation_passed=True,
     )

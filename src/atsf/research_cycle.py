@@ -97,7 +97,8 @@ def run_research_cycle(
     if len(evaluations) != len(population):
         raise ValueError("evaluator must return one evaluation per candidate")
 
-    selected = tuple(select_population(population, list(evaluations), policy.selection))
+    selected = tuple(select_population(population, list(evaluations), policy.selection,
+                                       prior_trials=generation * len(population)))
     rates = adapt_evolution(
         policy.crossover_rate,
         policy.mutation_rate,
