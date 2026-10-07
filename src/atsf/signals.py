@@ -5,10 +5,10 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
-from .strategy import Comparator, Condition, Indicator, Signal, StrategySpec
+from .strategy import BUILTIN_INDICATORS, Comparator, Condition, Indicator, Signal, StrategySpec
 
 
-SUPPORTED_INDICATORS: Final = frozenset({"sma", "ema", "rsi"})
+SUPPORTED_INDICATORS: Final = BUILTIN_INDICATORS
 
 
 def _source(data: pd.DataFrame, name: str) -> pd.Series:
@@ -28,27 +28,78 @@ def _rsi(series: pd.Series, period: int) -> pd.Series:
     return result.mask((average_loss == 0) & (average_gain > 0), 100.0)
 
 
+def _ema(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False, min_periods=period).mean()
+
+
+def _param(indicator: Indicator, key: str, default: float) -> float:
+    value = indicator.parameters.get(key, default)
+    if isinstance(value, str) or not np.isfinite(float(value)) or float(value) <= 0:
+        raise ValueError(f"indicator {indicator.name} parameter {key} must be a positive number")
+    return float(value)
+
+
+def _macd_line(source: pd.Series, indicator: Indicator) -> pd.Series:
+    slow = int(indicator.period)
+    fast = int(_param(indicator, "fast", max(2, round(slow * 12 / 26))))
+    if fast >= slow:
+        raise ValueError(f"indicator {indicator.name} requires fast < period (slow)")
+    return _ema(source, fast) - _ema(source, slow)
+
+
+def _indicator(data: pd.DataFrame, indicator: Indicator) -> pd.Series:
+    kind, period = indicator.kind, int(indicator.period)
+    source = _source(data, indicator.source)
+    rolling = source.rolling(period, min_periods=period)
+    if kind == "sma":
+        return rolling.mean()
+    if kind == "ema":
+        return _ema(source, period)
+    if kind == "rsi":
+        return _rsi(source, period)
+    if kind == "roc":
+        return source / source.shift(period) - 1.0
+    if kind == "stdev":
+        return rolling.std(ddof=1)
+    if kind == "zscore":
+        std = rolling.std(ddof=1)
+        return (source - rolling.mean()) / std.replace(0.0, np.nan)
+    if kind in {"bb_upper", "bb_lower"}:
+        width = _param(indicator, "k", 2.0) * rolling.std(ddof=1)
+        return rolling.mean() + width if kind == "bb_upper" else rolling.mean() - width
+    if kind in {"highest", "lowest"}:
+        # Prior-bar channel, so "close > highest" is a breakout rather than impossible.
+        prior = source.shift(1).rolling(period, min_periods=period)
+        return prior.max() if kind == "highest" else prior.min()
+    if kind == "atr":
+        high, low, close = _source(data, "high"), _source(data, "low"), _source(data, "close")
+        previous = close.shift(1)
+        true_range = pd.concat([high - low, (high - previous).abs(), (low - previous).abs()],
+                               axis=1).max(axis=1)
+        return true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    if kind == "macd":
+        return _macd_line(source, indicator)
+    if kind == "macd_signal":
+        signal_period = int(_param(indicator, "signal", 9))
+        return _ema(_macd_line(source, indicator), signal_period)
+    raise ValueError(f"unsupported indicator: {kind}")
+
+
 def compute_indicators(data: pd.DataFrame, indicators: list[Indicator]) -> dict[str, pd.Series]:
-    """Compute deterministic indicators using the DSL's explicit ``kind`` field."""
+    """Compute causal, deterministic indicators using the DSL's explicit ``kind`` field.
+
+    Every indicator at bar ``t`` uses only data up to and including ``t``.
+    """
     values: dict[str, pd.Series] = {}
     for indicator in indicators:
-        kind = indicator.kind.lower()
+        kind = (indicator.kind or "").lower()
         if kind not in SUPPORTED_INDICATORS:
             raise ValueError(f"unsupported indicator: {kind}")
         if indicator.period is None:
             raise ValueError(f"indicator {indicator.name} requires a period")
-        source = _source(data, indicator.source)
-        if kind == "sma":
-            result = source.rolling(indicator.period, min_periods=indicator.period).mean()
-        elif kind == "ema":
-            result = source.ewm(
-                span=indicator.period, adjust=False, min_periods=indicator.period
-            ).mean()
-        else:
-            result = _rsi(source, indicator.period)
         if indicator.name in values:
             raise ValueError(f"duplicate indicator name: {indicator.name}")
-        values[indicator.name] = result
+        values[indicator.name] = _indicator(data, indicator)
     return values
 
 

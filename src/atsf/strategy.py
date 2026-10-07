@@ -5,7 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-IndicatorKind = Literal["sma", "ema", "rsi"]
+IndicatorKind = Literal[
+    "sma", "ema", "rsi", "roc", "zscore", "stdev", "atr", "highest", "lowest",
+    "bb_upper", "bb_lower", "macd", "macd_signal",
+]
+BUILTIN_INDICATORS = frozenset(IndicatorKind.__args__)
 
 
 class Side(str, Enum):
@@ -37,7 +41,7 @@ class Indicator(BaseModel):
     def normalize_kind(cls, values: object) -> object:
         if isinstance(values, dict) and values.get("kind") is None:
             name = values.get("name")
-            if name in {"sma", "ema", "rsi"}:
+            if name in BUILTIN_INDICATORS:
                 values = dict(values)
                 values["kind"] = name
         return values
