@@ -31,7 +31,14 @@ def run_long_signal_backtest(
     strategy: StrategySpec,
     config: BacktestConfig | None = None,
 ) -> BacktestResult:
-    """Deterministic long-only kernel with an auditable return ledger."""
+    """Run a deterministic long-only backtest, liquidating at the final close.
+
+    Signals execute on the next bar. Any position still open at the end of the
+    supplied evaluation window is liquidated at that window's final close;
+    the exit incurs commission and slippage and is represented in the trade
+    ledger and trade_returns. This keeps fold-level trade statistics aligned
+    with the equity ledger without carrying positions across independent folds.
+    """
     config = config or BacktestConfig()
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
@@ -49,7 +56,12 @@ def run_long_signal_backtest(
     position = target.astype(float) * strategy.position_sizing.max_position
     returns = prices.pct_change().fillna(0.0) * position
     turnover = position.diff().abs().fillna(position.abs())
-    friction = turnover * (config.commission_bps + config.slippage_bps) / 10_000.0
+    cost_rate = (config.commission_bps + config.slippage_bps) / 10_000.0
+    friction = turnover * cost_rate
+    # The final mark-to-market return is earned while holding the position;
+    # liquidation friction is charged at that same final close.
+    if bool(target.iloc[-1]):
+        friction.iloc[-1] += float(position.iloc[-1]) * cost_rate
     net_returns = returns - friction
     equity = (1.0 + net_returns).cumprod() * config.initial_cash
     drawdown = equity / equity.cummax() - 1.0
@@ -70,11 +82,19 @@ def run_long_signal_backtest(
         elif not active and previous:
             if entry_price is not None:
                 gross = float(prices.loc[timestamp] / entry_price - 1.0)
-                cost = 2.0 * (config.commission_bps + config.slippage_bps) / 10_000.0
+                cost = 2.0 * cost_rate
                 trade_returns.append(gross * strategy.position_sizing.max_position - cost)
             trade_rows.append({"timestamp": timestamp, "action": "sell"})
             entry_price = None
         previous = active
+
+    if previous and entry_price is not None:
+        final_timestamp = data.index[-1]
+        gross = float(prices.iloc[-1] / entry_price - 1.0)
+        # Trade-level returns use the same full round-trip cost convention as
+        # completed trades, including the forced final-close exit.
+        trade_returns.append(gross * strategy.position_sizing.max_position - 2.0 * cost_rate)
+        trade_rows.append({"timestamp": final_timestamp, "action": "sell"})
 
     trades = pd.DataFrame(trade_rows, columns=["timestamp", "action"])
     return BacktestResult(
