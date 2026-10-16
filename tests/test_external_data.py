@@ -10,6 +10,7 @@ def test_provider_catalog_reports_public_and_credentialed_sources(monkeypatch):
     monkeypatch.delenv("ATSF_SEC_USER_AGENT", raising=False)
     providers = ExternalDataGateway().providers()
     assert providers["market"]["stooq"]["configured"] is True
+    assert providers["market"]["yahoo"]["configured"] is True
     assert providers["market"]["alphavantage"]["configured"] is False
     assert providers["fundamentals"]["sec"]["configured"] is False
 
@@ -102,3 +103,55 @@ def test_external_research_snapshot_fingerprint_changes_with_inputs():
         macro_series=(),
     )
     assert first.fingerprint == second.fingerprint
+
+
+
+def test_yahoo_market_data_is_normalized_and_fingerprinted(monkeypatch):
+    import json
+
+    import pandas as pd
+
+    gateway = ExternalDataGateway()
+    timestamps = [
+        int(pd.Timestamp("2026-01-02T15:00:00Z").timestamp()),
+        int(pd.Timestamp("2026-01-05T15:00:00Z").timestamp()),
+    ]
+    payload = {
+        "chart": {
+            "result": [{
+                "timestamp": timestamps,
+                "indicators": {"quote": [{
+                    "open": [10.0, 11.0],
+                    "high": [12.0, 13.0],
+                    "low": [9.0, 10.0],
+                    "close": [11.0, 12.0],
+                    "volume": [100.0, 120.0],
+                }]},
+            }],
+            "error": None,
+        }
+    }
+    seen = {}
+    def fetch(url, **kwargs):
+        seen["url"] = url
+        return json.dumps(payload).encode()
+
+    monkeypatch.setattr(gateway, "_get", fetch)
+    result = gateway.market_daily("AAPL", source="yahoo")
+    assert result.source == "yahoo"
+    assert result.dataset == "daily_ohlcv"
+    assert result.payload["rows"] == 2
+    assert result.payload["records"][0]["close"] == 11.0
+    assert "interval=1d" in seen["url"]
+    assert len(result.fingerprint) == 64
+
+
+def test_yahoo_market_data_rejects_vendor_error(monkeypatch):
+    gateway = ExternalDataGateway()
+    monkeypatch.setattr(
+        gateway,
+        "_get",
+        lambda url, **kwargs: b'{"chart":{"result":null,"error":{"code":"Not Found","description":"Unknown symbol"}}}',
+    )
+    with pytest.raises(ValueError, match="Yahoo Finance error"):
+        gateway.market_daily("NOT_A_REAL_SYMBOL", source="yahoo")
