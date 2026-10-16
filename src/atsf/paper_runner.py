@@ -25,35 +25,68 @@ def run_compiled_paper_strategy(
     *,
     config: PaperConfig | None = None,
 ) -> PaperRunResult:
-    """Run a compiled StrategySpec through the deterministic paper broker only."""
+    """Run paper-only execution with decisions filled at the next available close.
+
+    Signals are evaluated after each bar close and queued for the following bar.
+    A signal on the final bar cannot fill in-window. Any position still open at
+    the window end is liquidated at the final close unless the risk controller
+    has halted the run. This broker never submits live orders.
+    """
     if data.empty:
         raise ValueError("data cannot be empty")
+    if "close" not in data.columns:
+        raise ValueError("data must contain a close column")
     entry, exit_ = compiled.signals(data)
     broker = PaperBroker(config)
     risk = PaperRiskController(compiled.strategy.risk.max_drawdown)
     snapshots: list[PaperSnapshot] = []
+    pending_action: str | None = None
+
     for timestamp, row in data.iterrows():
         price = float(row["close"])
         current = broker.mark(timestamp, price)
         if not risk.check(current.equity):
+            # A runtime halt cancels pending entries and liquidates any held
+            # position at the current close; preserve the halted risk state.
+            if broker.position > 0:
+                broker.execute(timestamp, "sell", broker.position, price)
+                current = broker.mark(timestamp, price)
             snapshots.append(current)
             break
-        if bool(entry.loc[timestamp]) and broker.position == 0:
-            quantity = broker.cash * compiled.strategy.position_sizing.max_position / price
-            broker.execute(timestamp, "buy", quantity, price)
-        elif bool(exit_.loc[timestamp]) and broker.position > 0:
+
+        # Execute only an order decided on a previous bar.
+        if pending_action == "buy" and broker.position == 0:
+            quantity = (
+                broker.max_affordable_quantity(price)
+                * compiled.strategy.position_sizing.max_position
+            )
+            if quantity > 0:
+                broker.execute(timestamp, "buy", quantity, price)
+        elif pending_action == "sell" and broker.position > 0:
             broker.execute(timestamp, "sell", broker.position, price)
+        pending_action = None
+
         snapshot = broker.mark(timestamp, price)
         snapshots.append(snapshot)
         if not risk.check(snapshot.equity):
+            # Preserve a triggered halt while flattening any position. Do not
+            # run another risk check after liquidation, which could clear it.
+            if broker.position > 0:
+                broker.execute(timestamp, "sell", broker.position, price)
+                snapshots[-1] = broker.mark(timestamp, price)
             break
+
+        # Decisions made at this close are eligible to fill on the next bar.
+        if bool(entry.loc[timestamp]) and broker.position == 0:
+            pending_action = "buy"
+        elif bool(exit_.loc[timestamp]) and broker.position > 0:
+            pending_action = "sell"
 
     if snapshots and broker.position > 0 and not risk.state.halted:
         timestamp = data.index[-1]
         price = float(data.iloc[-1]["close"])
         broker.execute(timestamp, "sell", broker.position, price)
         snapshots[-1] = broker.mark(timestamp, price)
-        risk.check(snapshots[-1].equity)
 
     state = risk.state
     return PaperRunResult(
@@ -71,5 +104,5 @@ def run_paper_strategy(
     *,
     config: PaperConfig | None = None,
 ) -> PaperRunResult:
-    """Compile a validated strategy, then run only the compiled representation."""
+    """Compile a validated StrategySpec, then run only the paper representation."""
     return run_compiled_paper_strategy(data, compile_strategy(strategy), config=config)
