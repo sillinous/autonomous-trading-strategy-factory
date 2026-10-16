@@ -40,6 +40,11 @@ def run_long_signal_backtest(
     end is liquidated at the final close; this charges exit friction but does
     not carry exposure into a later fold. Final-bar entries are immediately
     liquidated at that same close because no subsequent bar exists in-window.
+
+    Each trade return is the compounded net portfolio return across that
+    trade's inclusive entry-to-exit timestamps, using the same per-bar net
+    returns as the equity curve. It includes entry/exit costs and is not a
+    simple price-change estimate.
     """
     config = config or BacktestConfig()
     if "close" not in data.columns:
@@ -82,30 +87,42 @@ def run_long_signal_backtest(
     trade_rows: list[dict[str, object]] = []
     trade_returns: list[float] = []
     previous = False
-    entry_price: float | None = None
-    for timestamp, active in target.items():
+    entry_index: int | None = None
+    for index_position, (timestamp, active) in enumerate(target.items()):
         active = bool(active)
         if active and not previous:
-            entry_price = float(prices.loc[timestamp])
-            trade_rows.append({"timestamp": timestamp, "action": "buy", "price": entry_price})
-        elif not active and previous:
-            if entry_price is not None:
-                gross = float(prices.loc[timestamp] / entry_price - 1.0)
-                trade_returns.append(
-                    gross * strategy.position_sizing.max_position - 2.0 * strategy.position_sizing.max_position * cost_rate
-                )
+            entry_index = index_position
             trade_rows.append(
-                {"timestamp": timestamp, "action": "sell", "price": float(prices.loc[timestamp])}
+                {
+                    "timestamp": timestamp,
+                    "action": "buy",
+                    "price": float(prices.iloc[index_position]),
+                }
             )
-            entry_price = None
+        elif not active and previous:
+            if entry_index is not None:
+                trade_factor = (1.0 + net_returns.iloc[entry_index : index_position + 1]).prod()
+                trade_returns.append(float(trade_factor - 1.0))
+            trade_rows.append(
+                {
+                    "timestamp": timestamp,
+                    "action": "sell",
+                    "price": float(prices.iloc[index_position]),
+                }
+            )
+            entry_index = None
         previous = active
 
-    if previous and entry_price is not None:
-        final_timestamp = data.index[-1]
-        gross = float(prices.iloc[-1] / entry_price - 1.0)
-        trade_returns.append(gross * strategy.position_sizing.max_position - 2.0 * strategy.position_sizing.max_position * cost_rate)
+    if previous and entry_index is not None:
+        final_position = len(data) - 1
+        trade_factor = (1.0 + net_returns.iloc[entry_index : final_position + 1]).prod()
+        trade_returns.append(float(trade_factor - 1.0))
         trade_rows.append(
-            {"timestamp": final_timestamp, "action": "sell", "price": float(prices.iloc[-1])}
+            {
+                "timestamp": data.index[-1],
+                "action": "sell",
+                "price": float(prices.iloc[-1]),
+            }
         )
 
     trades = pd.DataFrame(trade_rows, columns=["timestamp", "action", "price"])
