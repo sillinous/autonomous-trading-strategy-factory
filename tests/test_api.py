@@ -457,6 +457,8 @@ def test_operator_ui_contains_distinct_operator_controls(monkeypatch):
     assert 'refreshExternalData' in html
     assert 'refreshProviders' in html
     assert '/data/providers' in html
+    assert 'value="yahoo"' in html
+    assert 'Alpha Vantage · API key required' in html
     registry.close()
 
 
