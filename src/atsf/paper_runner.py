@@ -46,6 +46,11 @@ def run_compiled_paper_strategy(
         price = float(row["close"])
         current = broker.mark(timestamp, price)
         if not risk.check(current.equity):
+            # A runtime halt cancels pending entries and liquidates any held
+            # position at the current close; preserve the halted risk state.
+            if broker.position > 0:
+                broker.execute(timestamp, "sell", broker.position, price)
+                current = broker.mark(timestamp, price)
             snapshots.append(current)
             break
 
