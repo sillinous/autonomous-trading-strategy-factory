@@ -155,3 +155,24 @@ def test_yahoo_market_data_rejects_vendor_error(monkeypatch):
     )
     with pytest.raises(ValueError, match="Yahoo Finance error"):
         gateway.market_daily("NOT_A_REAL_SYMBOL", source="yahoo")
+
+
+
+def test_fred_rejects_mismatched_response_schema(monkeypatch):
+    gateway = ExternalDataGateway()
+    monkeypatch.setattr(gateway, "_get", lambda url, **kwargs: b"wrong_date,OTHER\n2026-01-01,1.0\n")
+    with pytest.raises(ValueError, match="does not match the requested series"):
+        gateway.fred_series("DFF")
+
+
+def test_external_provider_network_errors_are_normalized(monkeypatch):
+    from urllib.error import URLError
+
+    import atsf.external_data as external_data
+
+    def fail(*args, **kwargs):
+        raise URLError("network unavailable")
+
+    monkeypatch.setattr(external_data, "urlopen", fail)
+    with pytest.raises(RuntimeError, match="external data provider request failed"):
+        ExternalDataGateway(timeout=1).fred_series("DFF")
