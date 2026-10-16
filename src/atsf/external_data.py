@@ -59,6 +59,7 @@ class ExternalDataGateway:
             "market": {
                 "alphavantage": {"configured": bool(os.getenv("ALPHAVANTAGE_API_KEY")), "capabilities": ["daily_ohlcv", "news_sentiment"]},
                 "stooq": {"configured": True, "capabilities": ["daily_ohlcv"]},
+                "yahoo": {"configured": True, "capabilities": ["daily_ohlcv"]},
             },
             "macro": {
                 "fred": {"configured": True, "capabilities": ["series"]},
@@ -78,6 +79,49 @@ class ExternalDataGateway:
             if not key:
                 raise RuntimeError("ALPHAVANTAGE_API_KEY is not configured")
             frame = AlphaVantageDailyProvider(key, timeout=self.timeout).load(symbol, start, end)
+        elif source == "yahoo":
+            now = datetime.now(UTC)
+            period_start = int(start.replace(tzinfo=UTC).timestamp()) if start is not None else 0
+            period_end = int(end.replace(tzinfo=UTC).timestamp()) if end is not None else int(now.timestamp())
+            if period_start >= period_end:
+                raise ValueError("start must be before end")
+            query = urlencode({"period1": period_start, "period2": period_end, "interval": "1d", "events": "history"})
+            raw = self._get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?{query}",
+                user_agent="atsf/0.1 market-data",
+            )
+            response = json.loads(raw)
+            chart = response.get("chart", {})
+            if chart.get("error"):
+                raise ValueError(f"Yahoo Finance error: {chart['error']}")
+            results = chart.get("result")
+            if not isinstance(results, list) or not results:
+                raise ValueError("Yahoo Finance response contains no chart data")
+            result = results[0]
+            timestamps = result.get("timestamp", [])
+            quote_sets = result.get("indicators", {}).get("quote", [])
+            if not timestamps or not quote_sets:
+                raise ValueError("Yahoo Finance response contains no OHLCV observations")
+            quotes = quote_sets[0]
+            frame = pd.DataFrame(
+                {
+                    "open": quotes.get("open", []),
+                    "high": quotes.get("high", []),
+                    "low": quotes.get("low", []),
+                    "close": quotes.get("close", []),
+                    "volume": quotes.get("volume", []),
+                },
+                index=pd.to_datetime(timestamps, unit="s", utc=True).tz_localize(None),
+            )
+            frame = frame.dropna(subset=["open", "high", "low", "close"])
+            frame = frame.sort_index()
+            frame = validate_market_data(frame)
+            if start is not None:
+                frame = frame.loc[frame.index >= start.replace(tzinfo=None)]
+            if end is not None:
+                frame = frame.loc[frame.index < end.replace(tzinfo=None)]
+            if frame.empty:
+                raise ValueError("requested market-data range is empty")
         elif source == "stooq":
             query = urlencode({"s": symbol.lower(), "d1": start.strftime("%Y%m%d") if start else None, "d2": end.strftime("%Y%m%d") if end else None, "i": "d"})
             query = query.replace("d1=None&", "").replace("d2=None&", "")
