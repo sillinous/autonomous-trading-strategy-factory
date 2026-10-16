@@ -31,7 +31,16 @@ def run_long_signal_backtest(
     strategy: StrategySpec,
     config: BacktestConfig | None = None,
 ) -> BacktestResult:
-    """Deterministic long-only kernel with an auditable return ledger."""
+    """Backtest close-only signals with fills at the next close.
+
+    A signal observed at close[t-1] is filled at close[t]. The position filled
+    at close[t] earns only the subsequent close-to-close return ending at t+1,
+    never the return ending at its own fill. Position changes and costs are
+    booked at their fill timestamp. Any position open at the evaluation-window
+    end is liquidated at the final close; this charges exit friction but does
+    not carry exposure into a later fold. Final-bar entries are immediately
+    liquidated at that same close because no subsequent bar exists in-window.
+    """
     config = config or BacktestConfig()
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
@@ -45,12 +54,24 @@ def run_long_signal_backtest(
         raise ValueError("transaction costs cannot be negative")
 
     prices = data["close"].astype(float)
+    if not prices.map(pd.notna).all() or (prices <= 0).any():
+        raise ValueError("close prices must be finite and positive")
     target = signal.astype(bool).shift(1).fillna(False)
     position = target.astype(float) * strategy.position_sizing.max_position
-    returns = prices.pct_change().fillna(0.0) * position
+
+    # Exposure for the interval ending at t is the position held after close[t-1].
+    interval_exposure = position.shift(1).fillna(0.0)
+    price_returns = prices.pct_change().fillna(0.0)
+    gross_returns = price_returns * interval_exposure
+
     turnover = position.diff().abs().fillna(position.abs())
-    friction = turnover * (config.commission_bps + config.slippage_bps) / 10_000.0
-    net_returns = returns - friction
+    cost_rate = (config.commission_bps + config.slippage_bps) / 10_000.0
+    friction = turnover * cost_rate
+    # A position still open after the final fill is closed at the final close.
+    if bool(target.iloc[-1]):
+        friction.iloc[-1] += float(position.iloc[-1]) * cost_rate
+
+    net_returns = gross_returns - friction
     equity = (1.0 + net_returns).cumprod() * config.initial_cash
     drawdown = equity / equity.cummax() - 1.0
 
@@ -66,17 +87,28 @@ def run_long_signal_backtest(
         active = bool(active)
         if active and not previous:
             entry_price = float(prices.loc[timestamp])
-            trade_rows.append({"timestamp": timestamp, "action": "buy"})
+            trade_rows.append({"timestamp": timestamp, "action": "buy", "price": entry_price})
         elif not active and previous:
             if entry_price is not None:
                 gross = float(prices.loc[timestamp] / entry_price - 1.0)
-                cost = 2.0 * (config.commission_bps + config.slippage_bps) / 10_000.0
-                trade_returns.append(gross * strategy.position_sizing.max_position - cost)
-            trade_rows.append({"timestamp": timestamp, "action": "sell"})
+                trade_returns.append(
+                    gross * strategy.position_sizing.max_position - 2.0 * strategy.position_sizing.max_position * cost_rate
+                )
+            trade_rows.append(
+                {"timestamp": timestamp, "action": "sell", "price": float(prices.loc[timestamp])}
+            )
             entry_price = None
         previous = active
 
-    trades = pd.DataFrame(trade_rows, columns=["timestamp", "action"])
+    if previous and entry_price is not None:
+        final_timestamp = data.index[-1]
+        gross = float(prices.iloc[-1] / entry_price - 1.0)
+        trade_returns.append(gross * strategy.position_sizing.max_position - 2.0 * strategy.position_sizing.max_position * cost_rate)
+        trade_rows.append(
+            {"timestamp": final_timestamp, "action": "sell", "price": float(prices.iloc[-1])}
+        )
+
+    trades = pd.DataFrame(trade_rows, columns=["timestamp", "action", "price"])
     return BacktestResult(
         equity=equity,
         returns=net_returns,
