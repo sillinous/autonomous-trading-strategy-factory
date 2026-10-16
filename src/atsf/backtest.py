@@ -92,7 +92,7 @@ def run_long_signal_backtest(
             if entry_price is not None:
                 gross = float(prices.loc[timestamp] / entry_price - 1.0)
                 trade_returns.append(
-                    gross * strategy.position_sizing.max_position - 2.0 * cost_rate
+                    gross * strategy.position_sizing.max_position - 2.0 * strategy.position_sizing.max_position * cost_rate
                 )
             trade_rows.append(
                 {"timestamp": timestamp, "action": "sell", "price": float(prices.loc[timestamp])}
