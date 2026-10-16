@@ -50,6 +50,36 @@ def test_backtest_applies_next_bar_execution_and_costs():
     assert not result.trades.empty
 
 
+def test_position_does_not_earn_return_before_next_close_fill():
+    index = pd.date_range("2024-01-01", periods=3, freq="D")
+    data = pd.DataFrame({"close": [100, 200, 300]}, index=index)
+    signal = pd.Series([False, True, True], index=index)
+    result = run_long_signal_backtest(
+        data, signal, make_strategy(), BacktestConfig(commission_bps=0, slippage_bps=0)
+    )
+
+    # Signal from day 2 fills at day 3 close; the 100 -> 200 move is not earned.
+    assert result.trades.iloc[0]["price"] == 300
+    assert result.returns.iloc[1] == pytest.approx(0.0)
+    assert result.returns.iloc[2] == pytest.approx(0.0)
+    assert result.total_return == pytest.approx(0.0)
+
+
+def test_exit_bar_return_is_earned_until_the_close_fill():
+    index = pd.date_range("2024-01-01", periods=4, freq="D")
+    data = pd.DataFrame({"close": [100, 110, 120, 130]}, index=index)
+    signal = pd.Series([False, True, False, False], index=index)
+    result = run_long_signal_backtest(
+        data, signal, make_strategy(), BacktestConfig(commission_bps=0, slippage_bps=0)
+    )
+
+    # Entry fills at 120; exposure earns only the following 120 -> 130 interval.
+    assert result.trades["price"].tolist() == [120.0, 130.0]
+    assert result.returns.iloc[1] == pytest.approx(0.0)
+    assert result.returns.iloc[2] == pytest.approx(0.0)
+    assert result.returns.iloc[3] == pytest.approx(130 / 120 - 1)
+
+
 def test_open_position_is_liquidated_at_window_end_with_exit_friction():
     index = pd.date_range("2024-01-01", periods=4, freq="D")
     data = pd.DataFrame({"close": [100, 100, 110, 120]}, index=index)
