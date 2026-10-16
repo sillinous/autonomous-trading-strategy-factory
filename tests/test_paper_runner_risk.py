@@ -26,7 +26,7 @@ def make_strategy(max_drawdown=None):
 
 def test_paper_runner_halts_when_drawdown_limit_breaches():
     data = pd.DataFrame(
-        {"close": [100, 100, 120, 70, 60]},
+        {"close": [100, 100, 120, 70, 40]},
         index=pd.date_range("2025-01-01", periods=5),
     )
     result = run_paper_strategy(data, make_strategy(max_drawdown=0.10))
