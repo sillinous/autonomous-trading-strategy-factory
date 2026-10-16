@@ -69,6 +69,11 @@ def run_compiled_paper_strategy(
         snapshot = broker.mark(timestamp, price)
         snapshots.append(snapshot)
         if not risk.check(snapshot.equity):
+            # Preserve a triggered halt while flattening any position. Do not
+            # run another risk check after liquidation, which could clear it.
+            if broker.position > 0:
+                broker.execute(timestamp, "sell", broker.position, price)
+                snapshots[-1] = broker.mark(timestamp, price)
             break
 
         # Decisions made at this close are eligible to fill on the next bar.
@@ -82,7 +87,6 @@ def run_compiled_paper_strategy(
         price = float(data.iloc[-1]["close"])
         broker.execute(timestamp, "sell", broker.position, price)
         snapshots[-1] = broker.mark(timestamp, price)
-        risk.check(snapshots[-1].equity)
 
     state = risk.state
     return PaperRunResult(
