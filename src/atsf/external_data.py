@@ -170,6 +170,8 @@ class ExternalDataGateway:
         rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8"))))
         if not rows:
             raise ValueError("FRED response contains no observations")
+        if "observation_date" not in rows[0] or series_id not in rows[0]:
+            raise ValueError("FRED response does not match the requested series")
         observations = [{"date": row["observation_date"], "value": None if row[series_id] in {"", "."} else float(row[series_id])} for row in rows]
         return self._envelope("fred", "series", {"series_id": series_id, "observations": observations})
 
