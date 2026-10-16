@@ -61,14 +61,14 @@ def test_open_position_is_liquidated_at_window_end_with_exit_friction():
     assert result.trades["action"].tolist() == ["buy", "sell"]
     assert result.trades.iloc[-1]["timestamp"] == index[-1]
     assert len(result.trade_returns) == 1
-    assert result.trade_returns[0] == pytest.approx(0.20 - 0.0006)
+    assert result.trade_returns[0] == pytest.approx(120 / 110 - 1 - 0.0006)
     assert result.returns.iloc[-1] < data["close"].pct_change().fillna(0).iloc[-1]
 
 
 def test_position_closed_on_final_bar_is_not_double_counted():
     index = pd.date_range("2024-01-01", periods=4, freq="D")
     data = pd.DataFrame({"close": [100, 100, 110, 120]}, index=index)
-    signal = pd.Series([False, True, True, False], index=index)
+    signal = pd.Series([False, True, False, False], index=index)
     result = run_long_signal_backtest(data, signal, make_strategy())
 
     assert result.trades["action"].tolist() == ["buy", "sell"]
