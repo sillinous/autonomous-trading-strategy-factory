@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlencode
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -40,8 +41,11 @@ class ExternalDataGateway:
 
     def _get(self, url: str, *, user_agent: str = "atsf/0.1") -> bytes:
         request = Request(url, headers={"User-Agent": user_agent, "Accept": "application/json,text/csv,*/*"})
-        with urlopen(request, timeout=self.timeout) as response:
-            return response.read()
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return response.read()
+        except (URLError, TimeoutError) as exc:
+            raise RuntimeError(f"external data provider request failed: {exc}") from exc
 
     @staticmethod
     def _envelope(source: str, dataset: str, payload: dict) -> ExternalDataEnvelope:
