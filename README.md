@@ -69,20 +69,20 @@ The SQLite registry is stored in the named `atsf-data` volume. The container run
 User-testing builds expose the authenticated external-data surface:
 
 - `GET /data/providers` — configured provider catalog and capabilities.
-- `GET /data/market/{symbol}` — normalized real OHLCV data.
+- `GET /data/market/{symbol}` — normalized real OHLCV data from Stooq, Yahoo Finance, or Alpha Vantage (select with `source`).
 - `GET /data/macro/{series_id}` — FRED observations.
 - `GET /data/fundamentals/{cik}` — SEC company facts.
 - `GET /data/news` — Alpha Vantage news/sentiment when configured.
 - `GET /data/snapshot` — one immutable, fingerprinted market + macro + fundamentals + news snapshot.
 - `POST /research/runs/external` — runs deterministic research against externally fetched market data while retaining the external snapshot fingerprint.
 
-The gateway never substitutes synthetic production data. Provider credentials are injected through environment variables, never stored in source control. Copy `.env.example` to your local environment and supply `ALPHAVANTAGE_API_KEY` and `ATSF_SEC_USER_AGENT` when those providers are needed. Stooq market history and FRED's public CSV endpoint require no credentials in the current gateway. Every external snapshot is fingerprinted so research can be tied to the exact input received.
+The gateway never substitutes synthetic production data. Provider credentials are injected through environment variables, never stored in source control. Copy `.env.example` to your local environment and supply `ALPHAVANTAGE_API_KEY` and `ATSF_SEC_USER_AGENT` when those providers are needed. Stooq and Yahoo Finance daily market history and FRED's public CSV endpoint require no credentials in the current gateway. Yahoo Finance is a public web endpoint, not a guaranteed commercial data SLA; provider availability, licensing, adjustments, and rate limits must be considered before broader deployment. Every external snapshot is fingerprinted so research can be tied to the exact input received.
 
 ## Market-data providers
 
 `atsf.provider.MarketDataProvider` defines the vendor-neutral contract. Each provider exposes immutable `ProviderMetadata(source, timeframe, schema_version)`, which is the authoritative provenance for data it emits. `FrameMarketDataProvider` provides deterministic local/in-memory data for tests and controlled execution.
 
-`atsf.alphavantage.AlphaVantageDailyProvider` is the first external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
+`ExternalDataGateway` supports Stooq and Yahoo Finance for public daily OHLCV, Alpha Vantage for credentialed daily OHLCV and news sentiment, FRED for macroeconomic series, and SEC Company Facts for fundamentals. Network failures and malformed provider responses fail closed rather than fabricating data. `atsf.alphavantage.AlphaVantageDailyProvider` is the credentialed external adapter. It uses Alpha Vantage's `TIME_SERIES_DAILY` historical endpoint, normalizes the response to canonical OHLCV, validates it, supports bounded date filtering, and exposes source/timeframe/schema metadata for reproducible dataset registration. Full historical output depends on the vendor plan. See the official [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/) for current endpoint and plan details.
 
 `atsf.cached_provider.CachedMarketDataProvider` decorates any provider with a deterministic filesystem cache and inherits the wrapped provider's metadata. Each cache entry has a manifest containing the cache-key digest and a cryptographic fingerprint of the normalized frame; missing or tampered manifests/frames are treated as cache misses. Ingestion accepts optional provenance values only as assertions and rejects mismatches, so callers cannot silently relabel a dataset.
 
