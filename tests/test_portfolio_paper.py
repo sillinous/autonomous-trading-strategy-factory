@@ -123,3 +123,22 @@ def test_final_bar_entry_signal_does_not_create_same_window_fill():
         commission_bps=0, slippage_bps=0,
     )
     assert result.fills == ()
+
+
+def test_zero_weight_sleeve_is_ignored_without_creating_zero_cash_broker():
+    index = pd.date_range("2025-01-01", periods=4)
+    data = {
+        "a": pd.DataFrame({"close": [100, 101, 102, 103]}, index=index),
+        "b": pd.DataFrame({"close": [100, 101, 102, 103]}, index=index),
+    }
+    result = run_paper_portfolio(
+        data,
+        {"a": make_strategy("a"), "b": make_strategy("b")},
+        {"a": 1.0, "b": 0.0},
+        decisions={"a": approved(), "b": approved()},
+        commission_bps=0,
+        slippage_bps=0,
+    )
+    assert result.snapshots
+    assert result.final_equity > 0
+    assert all(strategy_id == "a" for strategy_id, _ in result.fills)
