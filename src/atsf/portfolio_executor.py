@@ -26,35 +26,40 @@ class PersistedPortfolioExecution:
     audit_events: tuple[PortfolioAuditEvent, ...]
 
 
-def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commission_bps: float, slippage_bps: float) -> pd.Series:
-    """Replay one sleeve with the same deterministic paper broker for attribution."""
+def _sleeve_returns(
+    frame: pd.DataFrame,
+    *,
+    initial_cash: float,
+    fills: tuple,
+    end_timestamp: pd.Timestamp,
+) -> pd.Series:
+    """Mark sleeve equity from the portfolio's actual fills, costs, and run window."""
     close = pd.to_numeric(frame["close"], errors="coerce")
     if frame.empty or close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
         raise ValueError("attribution data must contain finite positive close prices")
-    broker = PaperBroker(PaperConfig(initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps))
-    entry, exit_ = strategy_signals(frame, strategy)
+    window = frame.index[frame.index <= end_timestamp]
+    if len(window) == 0 or window[-1] != end_timestamp:
+        raise ValueError("attribution end timestamp must exist in the market data")
+    fills_by_timestamp: dict[pd.Timestamp, list] = {}
+    for fill in fills:
+        fills_by_timestamp.setdefault(fill.timestamp, []).append(fill)
+    cash = initial_cash
+    position = 0.0
     equity: list[float] = []
-    pending_action: str | None = None
-    for timestamp in frame.index:
-        price = float(close.loc[timestamp])
-        if pending_action == "buy" and broker.position == 0:
-            desired = broker.cash * strategy.position_sizing.max_position / price
-            quantity = min(desired, broker.max_affordable_quantity(price))
-            if quantity > 0:
-                broker.execute(timestamp, "buy", quantity, price)
-        elif pending_action == "sell" and broker.position > 0:
-            broker.execute(timestamp, "sell", broker.position, price)
-        pending_action = None
-        equity.append(broker.mark(timestamp, price).equity)
-        if bool(entry.loc[timestamp]) and broker.position == 0:
-            pending_action = "buy"
-        elif bool(exit_.loc[timestamp]) and broker.position > 0:
-            pending_action = "sell"
-    if broker.position > 0:
-        timestamp = frame.index[-1]
-        broker.execute(timestamp, "sell", broker.position, float(close.iloc[-1]))
-        equity[-1] = broker.mark(timestamp, float(close.iloc[-1])).equity
-    return pd.Series(equity, index=frame.index, dtype=float).pct_change().fillna(0.0)
+    for timestamp in window:
+        for fill in fills_by_timestamp.get(timestamp, []):
+            if fill.side == "buy":
+                cash -= fill.price * fill.quantity + fill.fee
+                position += fill.quantity
+            elif fill.side == "sell":
+                if fill.quantity > position + 1e-9:
+                    raise ValueError("portfolio fill ledger sells more than the sleeve holds")
+                cash += fill.price * fill.quantity - fill.fee
+                position = max(0.0, position - fill.quantity)
+            else:
+                raise ValueError(f"unsupported portfolio fill side: {fill.side}")
+        equity.append(cash + position * float(close.loc[timestamp]))
+    return pd.Series(equity, index=window, dtype=float).pct_change().fillna(0.0)
 
 
 def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, data: dict[str, pd.DataFrame], *, dataset_version: str, initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None) -> PersistedPortfolioExecution:
@@ -93,7 +98,16 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
     identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights, execution_config=execution_config, data_fingerprint=bundle.version)
     if store.get_portfolio_run(identity.run_id) is not None: raise ValueError("portfolio run already exists; execution is immutable")
     paper = run_paper_portfolio(data, strategies, weights, decisions=decisions, initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps, max_drawdown=max_drawdown)
-    sleeve_returns = {strategy_id: _sleeve_returns(data[strategy_id], strategies[strategy_id], initial_cash=initial_cash * weights[strategy_id], commission_bps=commission_bps, slippage_bps=slippage_bps) for strategy_id in weights if weights[strategy_id] > 0}
+    end_timestamp = paper.snapshots[-1].timestamp
+    sleeve_returns = {
+        strategy_id: _sleeve_returns(
+            data[strategy_id],
+            initial_cash=initial_cash * weights[strategy_id],
+            fills=tuple(fill for sleeve_id, fill in paper.fills if sleeve_id == strategy_id),
+            end_timestamp=end_timestamp,
+        )
+        for strategy_id in weights if weights[strategy_id] > 0
+    }
     if not sleeve_returns: raise ValueError("persisted portfolio has no positive-weight strategies")
     returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index(); returns.columns = list(sleeve_returns)
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
