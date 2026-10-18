@@ -64,3 +64,48 @@ def test_fill_lineage_authorizes_end_of_sample_liquidation_from_prior_bar_state(
     )
     lineage = build_fill_lineage(events, signals, halted=False)
     assert [item.reason for item in lineage] == ["entry_signal", "end_of_sample"]
+
+
+@pytest.mark.parametrize(
+    "entry_values",
+    [["False", "True", "False"], [False, None, True], [0, 1, 0]],
+)
+def test_fill_lineage_rejects_non_boolean_or_missing_signals(entry_values):
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    signals = {"s1": (pd.Series(entry_values, index=index), pd.Series([False, True, False], index=index))}
+    with pytest.raises(ValueError, match="non-missing boolean"):
+        build_fill_lineage((), signals, halted=False)
+
+
+def test_fill_lineage_rejects_mismatched_entry_exit_indexes():
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    signals = {"s1": (
+        pd.Series([True, False, False], index=index),
+        pd.Series([False, True], index=index[:2]),
+    )}
+    with pytest.raises(ValueError, match="indexes must match"):
+        build_fill_lineage((), signals, halted=False)
+
+
+def test_fill_lineage_rejects_duplicate_event_sequences():
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    events = (
+        PortfolioAuditEvent(0, "s1", "buy", index[1].isoformat(), 1.0, 100.0, 0.1),
+        PortfolioAuditEvent(0, "s1", "sell", index[2].isoformat(), 1.0, 101.0, 0.1),
+    )
+    with pytest.raises(ValueError, match="sequence values must be unique"):
+        build_fill_lineage(events, _signals(), halted=False)
+
+
+def test_fill_lineage_rejects_unknown_execution_action():
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    events = (PortfolioAuditEvent(0, "s1", "short", index[1].isoformat(), 1.0, 100.0, 0.1),)
+    with pytest.raises(ValueError, match="unsupported execution action"):
+        build_fill_lineage(events, _signals(), halted=False)
+
+
+def test_fill_lineage_rejects_fill_timestamp_missing_from_signal_index():
+    signals = _signals()
+    event = PortfolioAuditEvent(0, "s1", "buy", "2026-01-10T00:00:00", 1.0, 100.0, 0.1)
+    with pytest.raises(ValueError, match="absent from signals"):
+        build_fill_lineage((event,), signals, halted=False)
