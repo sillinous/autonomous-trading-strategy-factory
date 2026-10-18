@@ -150,7 +150,7 @@ def test_portfolio_risk_breach_cancels_pending_entries_before_fill():
         # Sleeve a enters first, then its price gap breaches portfolio drawdown.
         "a": pd.DataFrame({"close": [100, 100, 110, 120, 50, 50]}, index=index),
         # Sleeve b queues an entry at index[3], due to fill at index[4].
-        "b": pd.DataFrame({"close": [100, 100, 110, 120, 130, 140]}, index=index),
+        "b": pd.DataFrame({"close": [100, 100, 90, 120, 130, 140]}, index=index),
     }
     result = run_paper_portfolio(
         data,
