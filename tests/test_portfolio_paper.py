@@ -142,3 +142,28 @@ def test_zero_weight_sleeve_is_ignored_without_creating_zero_cash_broker():
     assert result.snapshots
     assert result.final_equity > 0
     assert all(strategy_id == "a" for strategy_id, _ in result.fills)
+
+
+def test_portfolio_risk_breach_cancels_pending_entries_before_fill():
+    index = pd.date_range("2025-01-01", periods=6)
+    data = {
+        # Sleeve a enters first, then its price gap breaches portfolio drawdown.
+        "a": pd.DataFrame({"close": [100, 100, 110, 120, 50, 50]}, index=index),
+        # Sleeve b queues an entry at index[3], due to fill at index[4].
+        "b": pd.DataFrame({"close": [100, 100, 90, 120, 130, 140]}, index=index),
+    }
+    result = run_paper_portfolio(
+        data,
+        {"a": make_strategy("a"), "b": make_strategy("b")},
+        {"a": 0.5, "b": 0.5},
+        decisions={"a": approved(), "b": approved()},
+        max_drawdown=0.10,
+        commission_bps=0,
+        slippage_bps=0,
+    )
+
+    assert result.halted
+    assert result.halt_reason == "maximum drawdown breached"
+    # b's queued entry must be cancelled, not bought and immediately liquidated.
+    assert not any(strategy_id == "b" and fill.side == "buy" for strategy_id, fill in result.fills)
+    assert all(fill.timestamp <= index[4] for _, fill in result.fills)
