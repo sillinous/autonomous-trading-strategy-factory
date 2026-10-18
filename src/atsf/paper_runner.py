@@ -50,6 +50,26 @@ def run_compiled_paper_strategy(
     if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
         raise ValueError("close prices must be finite and positive")
     normalized["close"] = close
+    strategy = compiled.strategy
+    indicator_names = {indicator.name for indicator in strategy.indicators}
+    source_columns = {indicator.source for indicator in strategy.indicators}
+    conditions = (
+        strategy.entry.all + strategy.entry.any
+        + strategy.exit.all + strategy.exit.any
+    )
+    for condition in conditions:
+        for operand in (condition.left, condition.right):
+            if isinstance(operand, str) and operand not in indicator_names:
+                source_columns.add(operand)
+    for column in source_columns:
+        if column not in normalized.columns:
+            raise ValueError(f"missing signal source column: {column}")
+        values = pd.to_numeric(normalized[column], errors="coerce")
+        if values.isna().any() or (~values.map(isfinite)).any():
+            raise ValueError(
+                f"signal source column must contain finite numeric values: {column}"
+            )
+        normalized[column] = values
     entry, exit_ = compiled.signals(normalized)
     broker = PaperBroker(config)
     risk = PaperRiskController(compiled.strategy.risk.max_drawdown)
