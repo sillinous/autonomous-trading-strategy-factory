@@ -109,3 +109,27 @@ def test_fill_lineage_rejects_fill_timestamp_missing_from_signal_index():
     event = PortfolioAuditEvent(0, "s1", "buy", "2026-01-10T00:00:00", 1.0, 100.0, 0.1)
     with pytest.raises(ValueError, match="absent from signals"):
         build_fill_lineage((event,), signals, halted=False)
+
+
+from atsf.portfolio_audit import audit_event_id
+
+
+@pytest.mark.parametrize(
+    "event, message",
+    [
+        (PortfolioAuditEvent(True, "s1", "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.0), "sequence must be"),
+        (PortfolioAuditEvent(0, "s1", "short", "2026-01-01T00:00:00", 1.0, 100.0, 0.0), "supported action"),
+        (PortfolioAuditEvent(0, "s1", "buy", "not-a-date", 1.0, 100.0, 0.0), "valid ISO 8601"),
+        (PortfolioAuditEvent(0, "s1", "buy", "2026-01-01T00:00:00+00:00", 1.0, 100.0, 0.0), "timezone-naive"),
+        (PortfolioAuditEvent(0, "s1", "buy", "2026-01-01T00:00:00", True, 100.0, 0.0), "must be numeric"),
+        (PortfolioAuditEvent(0, "s1", "buy", "2026-01-01T00:00:00", 1.0, "100", 0.0), "must be numeric"),
+    ],
+)
+def test_audit_event_id_rejects_malformed_event_fields(event, message):
+    with pytest.raises(ValueError, match=message):
+        audit_event_id(event)
+
+
+def test_audit_event_id_is_deterministic_for_valid_event():
+    event = PortfolioAuditEvent(3, "s1", "buy", "2026-01-01T00:00:00", 1.0, 100.0, 0.25)
+    assert audit_event_id(event) == audit_event_id(event)
