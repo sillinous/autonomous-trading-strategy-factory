@@ -27,6 +27,9 @@ class PaperRiskController:
         return self._state
 
     def check(self, equity: float) -> bool:
+        # A triggered halt is latched for the remainder of this run.
+        if self._state.halted:
+            return False
         if not isfinite(equity):
             self._state = PaperRiskState(self._state.peak_equity, True, "non-finite equity")
             return False
