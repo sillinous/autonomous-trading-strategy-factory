@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from atsf.execution_lineage import build_fill_lineage, decision_id, verify_fill_lineage
-from atsf.portfolio_audit import PortfolioAuditEvent
+from atsf.portfolio_audit import PortfolioAuditEvent, audit_event_id
 
 
 def _signals():
@@ -109,9 +109,6 @@ def test_fill_lineage_rejects_fill_timestamp_missing_from_signal_index():
     event = PortfolioAuditEvent(0, "s1", "buy", "2026-01-10T00:00:00", 1.0, 100.0, 0.1)
     with pytest.raises(ValueError, match="absent from signals"):
         build_fill_lineage((event,), signals, halted=False)
-
-
-from atsf.portfolio_audit import audit_event_id
 
 
 @pytest.mark.parametrize(
