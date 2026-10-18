@@ -82,9 +82,9 @@ def test_portfolio_paper_runner_rejects_misaligned_timestamps():
 
 
 def test_portfolio_paper_runner_liquidates_on_risk_halt():
-    index = pd.date_range("2025-01-01", periods=5)
+    index = pd.date_range("2025-01-01", periods=6)
     data = {
-        "a": pd.DataFrame({"close": [100, 100, 100, 50, 50]}, index=index),
+        "a": pd.DataFrame({"close": [100, 100, 110, 120, 50, 50]}, index=index),
     }
     result = run_paper_portfolio(
         data,
