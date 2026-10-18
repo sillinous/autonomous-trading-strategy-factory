@@ -130,3 +130,35 @@ def test_paper_runner_rejects_timezone_aware_index():
     )
     with pytest.raises(ValueError, match="timezone-naive"):
         run_paper_strategy(data, strategy())
+
+
+@pytest.mark.parametrize(
+    "volume, message",
+    [
+        ([10, 20, float("inf"), 40], "finite numeric values"),
+        ([10, 20, "bad", 40], "finite numeric values"),
+    ],
+)
+def test_paper_runner_rejects_invalid_indicator_source(volume, message):
+    index = pd.date_range("2025-01-01", periods=4)
+    data = pd.DataFrame(
+        {"close": [100, 101, 102, 103], "volume": volume},
+        index=index,
+    )
+    spec = strategy().model_copy(
+        update={"indicators": [Indicator(name="sma", source="volume", period=2)]}
+    )
+    with pytest.raises(ValueError, match=message):
+        run_paper_strategy(data, spec)
+
+
+def test_paper_runner_rejects_missing_indicator_source():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102, 103]},
+        index=pd.date_range("2025-01-01", periods=4),
+    )
+    spec = strategy().model_copy(
+        update={"indicators": [Indicator(name="sma", source="volume", period=2)]}
+    )
+    with pytest.raises(ValueError, match="missing signal source column.*volume"):
+        run_paper_strategy(data, spec)
