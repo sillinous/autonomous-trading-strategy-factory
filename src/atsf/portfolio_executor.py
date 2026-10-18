@@ -90,7 +90,7 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
         strategy = store.get_strategy(strategy_id)
         if strategy is None: raise ValueError(f"persisted portfolio references unknown strategy: {strategy_id}")
         evidence = store.get_evaluation_evidence(experiment_ids[strategy_id])
-        if evidence is None or "promotion" not in evidence: raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
+        if not isinstance(evidence, dict) or "promotion" not in evidence: raise ValueError(f"missing or invalid promotion evidence for strategy: {strategy_id}")
         promotion = evidence["promotion"]
         if not isinstance(promotion, dict):
             raise ValueError(f"invalid promotion evidence for strategy: {strategy_id}")
