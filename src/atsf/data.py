@@ -46,6 +46,9 @@ def validate_market_data(data: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("market data contains missing values")
     if (normalized["volume"] < 0).any():
         raise ValueError("volume cannot be negative")
+    price_columns = ["open", "high", "low", "close"]
+    if (normalized[price_columns] <= 0).any().any():
+        raise ValueError("OHLC prices must be positive")
     if (normalized["low"] > normalized[["open", "close", "high"]].min(axis=1)).any():
         raise ValueError("low must not exceed OHLC values")
     if (normalized["high"] < normalized[["open", "close", "low"]].max(axis=1)).any():
