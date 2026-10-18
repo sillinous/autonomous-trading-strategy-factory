@@ -121,3 +121,12 @@ def test_paper_runner_rejects_missing_timestamp():
     )
     with pytest.raises(ValueError, match="missing timestamps"):
         run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_timezone_aware_index():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.date_range("2025-01-01", periods=3, tz="UTC"),
+    )
+    with pytest.raises(ValueError, match="timezone-naive"):
+        run_paper_strategy(data, strategy())
