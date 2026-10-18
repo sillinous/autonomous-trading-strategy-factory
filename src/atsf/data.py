@@ -29,6 +29,8 @@ def validate_market_data(data: pd.DataFrame) -> pd.DataFrame:
     normalized_index = data.index if isinstance(data.index, pd.DatetimeIndex) else pd.to_datetime(data.index, errors="raise")
     if not isinstance(normalized_index, pd.DatetimeIndex):
         raise TypeError("market data index must be a DatetimeIndex")
+    if normalized_index.isna().any():
+        raise ValueError("market data index cannot contain missing timestamps")
     if not normalized_index.is_monotonic_increasing:
         raise ValueError("market data index must be monotonically increasing")
     if normalized_index.has_duplicates:
