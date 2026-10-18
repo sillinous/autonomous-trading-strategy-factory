@@ -170,3 +170,22 @@ def test_backtest_rejects_unsorted_or_duplicate_timestamps(index):
 
     with pytest.raises(ValueError, match="timestamps must be sorted and unique"):
         run_long_signal_backtest(data, signal, make_strategy())
+
+
+
+@pytest.mark.parametrize(
+    "commission_bps,slippage_bps",
+    [(5_000, 0), (4_000, 1_000), (2_500, 2_500)],
+)
+def test_backtest_rejects_extreme_combined_transaction_costs(commission_bps, slippage_bps):
+    index = pd.date_range("2026-01-01", periods=3)
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series([False, True, False], index=index)
+
+    with pytest.raises(ValueError, match="combined transaction costs must be below 5000 bps"):
+        run_long_signal_backtest(
+            data,
+            signal,
+            make_strategy(),
+            BacktestConfig(commission_bps=commission_bps, slippage_bps=slippage_bps),
+        )

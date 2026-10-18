@@ -59,6 +59,8 @@ def run_long_signal_backtest(
         raise ValueError("initial_cash must be positive")
     if config.commission_bps < 0 or config.slippage_bps < 0:
         raise ValueError("transaction costs cannot be negative")
+    if config.commission_bps + config.slippage_bps >= 5_000:
+        raise ValueError("combined transaction costs must be below 5000 bps")
     if signal.isna().any():
         raise ValueError("signal cannot contain missing values")
 

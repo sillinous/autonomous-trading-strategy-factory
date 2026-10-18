@@ -41,6 +41,8 @@ class PaperBroker:
             raise ValueError("commission_bps must be non-negative and finite")
         if self.config.slippage_bps < 0 or not isfinite(self.config.slippage_bps):
             raise ValueError("slippage_bps must be non-negative and finite")
+        if self.config.commission_bps + self.config.slippage_bps >= 5_000:
+            raise ValueError("combined transaction costs must be below 5000 bps")
         self.cash = self.config.initial_cash
         self.position = 0.0
         self.fills: list[PaperFill] = []

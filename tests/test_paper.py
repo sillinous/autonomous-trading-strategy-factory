@@ -24,3 +24,13 @@ def test_paper_broker_marks_equity():
     broker.execute(pd.Timestamp("2025-01-01"), "buy", 2, 100)
     snapshot = broker.mark(pd.Timestamp("2025-01-02"), 110)
     assert snapshot.equity > 1_000
+
+
+
+@pytest.mark.parametrize(
+    "commission_bps,slippage_bps",
+    [(5_000, 0), (4_000, 1_000), (2_500, 2_500)],
+)
+def test_paper_broker_rejects_extreme_combined_transaction_costs(commission_bps, slippage_bps):
+    with pytest.raises(ValueError, match="combined transaction costs must be below 5000 bps"):
+        PaperBroker(PaperConfig(commission_bps=commission_bps, slippage_bps=slippage_bps))
