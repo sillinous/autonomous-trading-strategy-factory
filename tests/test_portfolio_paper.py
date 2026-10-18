@@ -237,3 +237,16 @@ def test_portfolio_paper_runner_rejects_timezone_aware_timestamps():
             {"a": 1.0},
             decisions={"a": approved()},
         )
+
+
+
+def test_portfolio_paper_runner_rejects_live_stage_for_paper_execution():
+    index = pd.date_range("2025-01-01", periods=6)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102, 103, 104, 105]}, index=index)}
+    with pytest.raises(PermissionError, match="not eligible"):
+        run_paper_portfolio(
+            data,
+            {"a": make_strategy("a")},
+            {"a": 1.0},
+            decisions={"a": PromotionDecision(stage="live", eligible=True, reasons=())},
+        )
