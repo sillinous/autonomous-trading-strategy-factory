@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from .promotion import PromotionDecision
 
@@ -26,6 +27,12 @@ class PaperRiskController:
         return self._state
 
     def check(self, equity: float) -> bool:
+        # A halt is a latched safety state; recovery must not silently re-arm execution.
+        if self._state.halted:
+            return False
+        if not isfinite(equity):
+            self._state = PaperRiskState(self._state.peak_equity, True, "non-finite equity")
+            return False
         if equity <= 0:
             self._state = PaperRiskState(self._state.peak_equity, True, "non-positive equity")
             return False
