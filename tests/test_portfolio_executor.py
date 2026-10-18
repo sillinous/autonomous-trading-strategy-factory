@@ -194,6 +194,8 @@ def test_sleeve_attribution_uses_actual_fill_ledger_and_stops_at_run_end():
         ("eligible", None, "eligibility must be boolean"),
         ("stage", ["paper"], "invalid promotion stage"),
         ("stage", "unrecognized", "invalid promotion stage"),
+        ("stage", "promoted", "invalid promotion stage"),
+        ("stage", "live", "invalid promotion stage"),
         ("reasons", "none", "reasons must be a list of strings"),
         ("reasons", [False], "reasons must be a list of strings"),
     ],
