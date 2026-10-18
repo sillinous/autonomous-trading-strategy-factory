@@ -52,6 +52,8 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     indexes = [frame.index for frame in data.values()]
     if any(not isinstance(index, pd.DatetimeIndex) for index in indexes):
         raise ValueError("all paper portfolio indexes must be DatetimeIndex")
+    if any(index.isna().any() for index in indexes):
+        raise ValueError("all paper portfolio indexes must not contain missing timestamps")
     if any(not index.is_monotonic_increasing or index.has_duplicates for index in indexes):
         raise ValueError("all paper portfolio indexes must be sorted and unique")
     reference_index = indexes[0]
@@ -60,6 +62,7 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     if any(not index.equals(reference_index) for index in indexes[1:]):
         raise ValueError("all paper portfolio datasets must use the same timestamps")
 
+    normalized_data: dict[str, pd.DataFrame] = {}
     brokers: dict[str, PaperBroker] = {}
     signals: dict[str, tuple[pd.Series, pd.Series]] = {}
     for strategy_id, strategy in strategies.items():
@@ -69,14 +72,18 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         close = pd.to_numeric(frame["close"], errors="coerce")
         if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
             raise ValueError(f"data for {strategy_id} must contain finite positive close prices")
+        normalized_frame = frame.copy()
+        normalized_frame["close"] = close
+        normalized_data[strategy_id] = normalized_frame
         if weights[strategy_id] > 0:
             brokers[strategy_id] = PaperBroker(PaperConfig(
                 initial_cash=initial_cash * weights[strategy_id],
                 commission_bps=commission_bps,
                 slippage_bps=slippage_bps,
             ))
-        signals[strategy_id] = strategy_signals(frame, strategy)
+        signals[strategy_id] = strategy_signals(normalized_frame, strategy)
 
+    data = normalized_data
     risk = PaperRiskController(max_drawdown)
     reserve = initial_cash * (1.0 - total_weight)
     snapshots: list[PortfolioPaperSnapshot] = []
