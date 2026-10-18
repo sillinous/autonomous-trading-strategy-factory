@@ -77,3 +77,40 @@ def test_risk_halt_liquidates_open_position_at_current_close():
     assert result.fills[-1].side == "sell"
     assert result.fills[-1].timestamp == index[-1]
     assert result.final_equity == result.snapshots[-1].cash
+
+
+import pytest
+
+
+def test_paper_runner_rejects_non_datetime_index():
+    data = pd.DataFrame({"close": [100, 101, 102]}, index=[1, 2, 3])
+    with pytest.raises(ValueError, match="DatetimeIndex"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_unsorted_timestamps():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.to_datetime(["2025-01-02", "2025-01-01", "2025-01-03"]),
+    )
+    with pytest.raises(ValueError, match="monotonically increasing"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_duplicate_timestamps():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.to_datetime(["2025-01-01", "2025-01-01", "2025-01-03"]),
+    )
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        run_paper_strategy(data, strategy())
+
+
+@pytest.mark.parametrize("invalid_close", [0, -1, float("nan"), float("inf"), "not-a-price"])
+def test_paper_runner_rejects_invalid_close_prices(invalid_close):
+    data = pd.DataFrame(
+        {"close": [100, 101, invalid_close]},
+        index=pd.date_range("2025-01-01", periods=3),
+    )
+    with pytest.raises(ValueError, match="paper close prices"):
+        run_paper_strategy(data, strategy())
