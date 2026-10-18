@@ -120,3 +120,53 @@ def test_metrics_are_defined_for_flat_equity():
     equity = pd.Series([100, 100, 100])
     assert sharpe_ratio(equity) == 0
     assert max_drawdown(equity) == 0
+
+
+
+@pytest.mark.parametrize("bad_price", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+def test_backtest_rejects_non_finite_or_non_positive_close_prices(bad_price):
+    index = pd.date_range("2026-01-01", periods=3)
+    data = pd.DataFrame({"close": [100.0, bad_price, 102.0]}, index=index)
+    signal = pd.Series([False, True, False], index=index)
+
+    with pytest.raises(ValueError, match="close prices must be finite and positive"):
+        run_long_signal_backtest(data, signal, make_strategy())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        BacktestConfig(initial_cash=float("nan")),
+        BacktestConfig(initial_cash=float("inf")),
+        BacktestConfig(commission_bps=float("nan")),
+        BacktestConfig(slippage_bps=float("inf")),
+    ],
+)
+def test_backtest_rejects_non_finite_configuration(config):
+    index = pd.date_range("2026-01-01", periods=3)
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series([False, True, False], index=index)
+
+    with pytest.raises(ValueError, match="configuration values must be finite"):
+        run_long_signal_backtest(data, signal, make_strategy(), config)
+
+
+def test_backtest_rejects_missing_signal_values():
+    index = pd.date_range("2026-01-01", periods=3)
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series([False, float("nan"), False], index=index)
+
+    with pytest.raises(ValueError, match="signal cannot contain missing values"):
+        run_long_signal_backtest(data, signal, make_strategy())
+
+
+@pytest.mark.parametrize("index", [
+    pd.DatetimeIndex(["2026-01-02", "2026-01-01", "2026-01-03"]),
+    pd.DatetimeIndex(["2026-01-01", "2026-01-01", "2026-01-03"]),
+])
+def test_backtest_rejects_unsorted_or_duplicate_timestamps(index):
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series([False, True, False], index=index)
+
+    with pytest.raises(ValueError, match="timestamps must be sorted and unique"):
+        run_long_signal_backtest(data, signal, make_strategy())
