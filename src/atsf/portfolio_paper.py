@@ -84,6 +84,26 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     pending: dict[str, str | None] = dict.fromkeys(strategies)
 
     for timestamp in reference_index:
+        # Check the marked portfolio before allowing queued orders to execute.
+        # A price gap can breach the risk limit between the prior decision close
+        # and this fill close; pending entries must not execute after that breach.
+        equity_before_fills = reserve + sum(
+            broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity
+            for strategy_id, broker in brokers.items()
+        )
+        if not risk.check(equity_before_fills):
+            pending = dict.fromkeys(strategies)
+            for strategy_id, broker in brokers.items():
+                if broker.position > 0:
+                    price = float(data[strategy_id].loc[timestamp, "close"])
+                    fills.append((strategy_id, broker.execute(timestamp, "sell", broker.position, price)))
+            equity = reserve + sum(
+                broker.mark(timestamp, float(data[strategy_id].loc[timestamp, "close"])).equity
+                for strategy_id, broker in brokers.items()
+            )
+            snapshots.append(PortfolioPaperSnapshot(timestamp, equity, reserve))
+            break
+
         # Execute only decisions recorded at the preceding close.
         for strategy_id, broker in brokers.items():
             action = pending[strategy_id]
