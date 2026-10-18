@@ -97,13 +97,13 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
         stage = promotion.get("stage")
         eligible = promotion.get("eligible")
         reasons = promotion.get("reasons")
-        if not isinstance(stage, str) or stage not in {"research", "paper"}:
+        if not isinstance(stage, str) or stage not in {"research", "paper", "promoted"}:
             raise ValueError(f"invalid promotion stage for strategy: {strategy_id}")
         if not isinstance(eligible, bool):
             raise ValueError(f"promotion eligibility must be boolean for strategy: {strategy_id}")
         if not isinstance(reasons, list) or any(not isinstance(reason, str) for reason in reasons):
             raise ValueError(f"promotion reasons must be a list of strings for strategy: {strategy_id}")
-        if eligible != (stage == "paper") or eligible != (len(reasons) == 0):
+        if eligible != (stage in {"paper", "promoted"}) or eligible != (len(reasons) == 0):
             raise ValueError(f"inconsistent promotion evidence for strategy: {strategy_id}")
         decisions[strategy_id] = PromotionDecision(stage=stage, eligible=eligible, reasons=tuple(reasons))
         strategies[strategy_id] = strategy
