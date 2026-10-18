@@ -244,6 +244,7 @@ def test_executor_rejects_non_object_promotion_evidence():
         ("paper", False, ["failed robustness"]),
         ("paper", True, ["failed robustness"]),
         ("research", False, []),
+        ("promoted", False, ["failed robustness"]),
     ],
 )
 def test_executor_rejects_inconsistent_promotion_evidence(stage, eligible, reasons):
