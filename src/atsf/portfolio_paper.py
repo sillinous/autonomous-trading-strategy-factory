@@ -49,6 +49,7 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         if (
             not isinstance(decision, PromotionDecision)
             or not isinstance(decision.eligible, bool)
+            or not isinstance(decision.stage, str)
             or decision.stage not in {"promoted", "paper"}
             or not isinstance(decision.reasons, tuple)
             or any(not isinstance(reason, str) for reason in decision.reasons)
