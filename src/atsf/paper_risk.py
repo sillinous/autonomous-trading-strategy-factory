@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from .promotion import PromotionDecision
 
@@ -26,6 +27,9 @@ class PaperRiskController:
         return self._state
 
     def check(self, equity: float) -> bool:
+        if not isfinite(equity):
+            self._state = PaperRiskState(self._state.peak_equity, True, "non-finite equity")
+            return False
         if equity <= 0:
             self._state = PaperRiskState(self._state.peak_equity, True, "non-positive equity")
             return False
