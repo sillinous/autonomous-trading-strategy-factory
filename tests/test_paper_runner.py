@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from atsf.paper import PaperConfig
 from atsf.paper_runner import run_paper_strategy
@@ -77,3 +78,46 @@ def test_risk_halt_liquidates_open_position_at_current_close():
     assert result.fills[-1].side == "sell"
     assert result.fills[-1].timestamp == index[-1]
     assert result.final_equity == result.snapshots[-1].cash
+
+
+@pytest.mark.parametrize("bad_close", [0, -1, float("nan"), float("inf"), float("-inf"), "not-a-price"])
+def test_paper_runner_rejects_invalid_close_prices(bad_close):
+    data = pd.DataFrame(
+        {"close": [100, 101, bad_close]},
+        index=pd.date_range("2025-01-01", periods=3),
+    )
+    with pytest.raises(ValueError, match="close prices must be finite and positive"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_non_datetime_index():
+    data = pd.DataFrame({"close": [100, 101, 102]}, index=[0, 1, 2])
+    with pytest.raises(ValueError, match="DatetimeIndex"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_unsorted_index():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.to_datetime(["2025-01-02", "2025-01-01", "2025-01-03"]),
+    )
+    with pytest.raises(ValueError, match="sorted and unique"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_duplicate_index():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.to_datetime(["2025-01-01", "2025-01-01", "2025-01-03"]),
+    )
+    with pytest.raises(ValueError, match="sorted and unique"):
+        run_paper_strategy(data, strategy())
+
+
+def test_paper_runner_rejects_missing_timestamp():
+    data = pd.DataFrame(
+        {"close": [100, 101, 102]},
+        index=pd.DatetimeIndex(["2025-01-01", None, "2025-01-03"]),
+    )
+    with pytest.raises(ValueError, match="missing timestamps"):
+        run_paper_strategy(data, strategy())
