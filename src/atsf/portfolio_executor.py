@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 
 import pandas as pd
@@ -111,6 +111,26 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
     if not sleeve_returns: raise ValueError("persisted portfolio has no positive-weight strategies")
     returns = pd.concat(sleeve_returns, axis=1, join="inner").sort_index(); returns.columns = list(sleeve_returns)
     attribution = attribute_run(returns, {key: weights[key] for key in sleeve_returns})
+    # Compound each sleeve's equity return before aggregating contributions.
+    # Summing weighted daily returns does not reconcile to final portfolio equity.
+    contributions = tuple(
+        replace(
+            item,
+            return_contribution=float(
+                weights[item.strategy_id]
+                * ((1.0 + returns[item.strategy_id]).prod() - 1.0)
+            ),
+        )
+        for item in attribution.contributions
+    )
+    attribution = replace(
+        attribution,
+        total_return=float(sum(item.return_contribution for item in contributions)),
+        contributions=contributions,
+    )
+    realized_return = paper.final_equity / initial_cash - 1.0
+    if abs(attribution.total_return - realized_return) > 1e-9:
+        raise ValueError("portfolio attribution does not reconcile to final paper equity")
     audit_events = tuple(PortfolioAuditEvent(sequence=sequence, strategy_id=strategy_id, action=fill.side, timestamp=fill.timestamp.isoformat(), quantity=float(fill.quantity), price=float(fill.price), fee=float(fill.fee)) for sequence, (strategy_id, fill) in enumerate(paper.fills))
     signals = {strategy_id: strategy_signals(data[strategy_id], strategies[strategy_id]) for strategy_id in strategies}
     liquidation_timestamp = paper.snapshots[-1].timestamp if paper.halted and paper.snapshots else None
