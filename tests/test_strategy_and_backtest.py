@@ -91,7 +91,7 @@ def test_open_position_is_liquidated_at_window_end_with_exit_friction():
     assert result.trades["action"].tolist() == ["buy", "sell"]
     assert result.trades.iloc[-1]["timestamp"] == index[-1]
     assert len(result.trade_returns) == 1
-    assert result.trade_returns[0] == pytest.approx(120 / 110 - 1 - 0.0006)
+    assert result.trade_returns[0] == pytest.approx((1 + result.returns.iloc[2:4]).prod() - 1)
     assert result.returns.iloc[-1] < data["close"].pct_change().fillna(0).iloc[-1]
 
 
@@ -189,3 +189,24 @@ def test_backtest_rejects_extreme_combined_transaction_costs(commission_bps, sli
             make_strategy(),
             BacktestConfig(commission_bps=commission_bps, slippage_bps=slippage_bps),
         )
+
+
+def test_closed_trade_return_compounds_exact_net_equity_returns():
+    index = pd.date_range("2026-02-01", periods=7, freq="D")
+    data = pd.DataFrame({"close": [100, 101, 103, 99, 105, 104, 110]}, index=index)
+    signal = pd.Series([False, True, False, False, True, False, False], index=index)
+    result = run_long_signal_backtest(
+        data,
+        signal,
+        make_strategy(),
+        BacktestConfig(initial_cash=10_000, commission_bps=7, slippage_bps=11),
+    )
+
+    # The two positions fill at index[2] and index[5], respectively.
+    assert result.trade_returns[0] == pytest.approx(
+        (1 + result.returns.iloc[2:4]).prod() - 1
+    )
+    assert len(result.trade_returns) == 2
+    assert result.trade_returns[1] == pytest.approx(
+        (1 + result.returns.iloc[5:7]).prod() - 1
+    )
