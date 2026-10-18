@@ -167,3 +167,32 @@ def test_portfolio_risk_breach_cancels_pending_entries_before_fill():
     # b's queued entry must be cancelled, not bought and immediately liquidated.
     assert not any(strategy_id == "b" and fill.side == "buy" for strategy_id, fill in result.fills)
     assert all(fill.timestamp <= index[4] for _, fill in result.fills)
+
+
+def test_portfolio_paper_runner_rejects_missing_timestamps():
+    index = pd.DatetimeIndex(["2025-01-01", None, "2025-01-03"])
+    data = pd.DataFrame({"close": [100, 101, 102]}, index=index)
+    with pytest.raises(ValueError, match="missing timestamps"):
+        run_paper_portfolio(
+            {"a": data},
+            {"a": make_strategy("a")},
+            {"a": 1.0},
+            decisions={"a": approved()},
+        )
+
+
+def test_portfolio_paper_runner_normalizes_numeric_string_closes():
+    index = pd.date_range("2025-01-01", periods=6)
+    data = {
+        "a": pd.DataFrame({"close": ["100", "100", "110", "120", "90", "90"]}, index=index)
+    }
+    result = run_paper_portfolio(
+        data,
+        {"a": make_strategy("a")},
+        {"a": 1.0},
+        decisions={"a": approved()},
+        commission_bps=0,
+        slippage_bps=0,
+    )
+    assert result.fills
+    assert all(isinstance(fill.price, float) for _, fill in result.fills)
