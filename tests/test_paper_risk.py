@@ -21,3 +21,13 @@ def test_paper_risk_rejects_non_positive_equity():
 def test_paper_risk_validates_limit():
     with pytest.raises(ValueError):
         PaperRiskController(max_drawdown=1.0)
+
+
+
+@pytest.mark.parametrize("equity", [float("nan"), float("inf"), float("-inf")])
+def test_paper_risk_halts_on_non_finite_equity(equity):
+    controller = PaperRiskController(max_drawdown=0.10)
+
+    assert not controller.check(equity)
+    assert controller.state.halted
+    assert controller.state.reason == "non-finite equity"
