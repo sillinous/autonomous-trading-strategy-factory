@@ -5,7 +5,8 @@ from atsf.dataset_bundle import DatasetBundleIdentity, bundle_identity
 from atsf.experiment import ExperimentResult, ExperimentSpec
 from atsf.lineage import LineageRecord
 from atsf.portfolio_audit import PortfolioAuditEvent
-from atsf.portfolio_executor import execute_persisted_portfolio
+from atsf.paper import PaperFill
+from atsf.portfolio_executor import _sleeve_returns, execute_persisted_portfolio
 from atsf.registry import ExperimentRegistry
 from atsf.strategy import Comparator, Condition, Indicator, PositionSizing, RiskLimits, Signal, StrategySpec
 
@@ -160,3 +161,23 @@ def test_registry_audit_ledger_rejects_gaps_and_non_members():
     with pytest.raises(ValueError, match="persisted portfolio members"):
         registry.save_portfolio_audit_events("manual-run", [unknown])
     registry.close()
+
+
+
+def test_sleeve_attribution_uses_actual_fill_ledger_and_stops_at_run_end():
+    index = pd.date_range("2026-02-01", periods=4, freq="D")
+    frame = pd.DataFrame({"close": [100.0, 110.0, 90.0, 80.0]}, index=index)
+    fills = (
+        PaperFill(index[1], "buy", 2.0, 111.0, 1.0),
+        PaperFill(index[2], "sell", 2.0, 89.0, 1.0),
+    )
+    returns = _sleeve_returns(
+        frame,
+        initial_cash=1_000.0,
+        fills=fills,
+        end_timestamp=index[2],
+    )
+    expected_equity = pd.Series([1_000.0, 997.0, 954.0], index=index[:3])
+    expected_returns = expected_equity.pct_change().fillna(0.0)
+    pd.testing.assert_series_equal(returns, expected_returns)
+    assert index[3] not in returns.index
