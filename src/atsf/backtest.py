@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import pandas as pd
 
@@ -44,17 +45,28 @@ def run_long_signal_backtest(
     config = config or BacktestConfig()
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError("backtest data index must be a DatetimeIndex")
+    if not data.index.is_monotonic_increasing or data.index.has_duplicates:
+        raise ValueError("backtest timestamps must be sorted and unique")
     if not data.index.equals(signal.index):
         raise ValueError("data and signal indexes must match")
     if data.empty:
         raise ValueError("data cannot be empty")
+    if not all(isfinite(value) for value in (config.initial_cash, config.commission_bps, config.slippage_bps)):
+        raise ValueError("backtest configuration values must be finite")
     if config.initial_cash <= 0:
         raise ValueError("initial_cash must be positive")
     if config.commission_bps < 0 or config.slippage_bps < 0:
         raise ValueError("transaction costs cannot be negative")
+    if signal.isna().any():
+        raise ValueError("signal cannot contain missing values")
 
-    prices = data["close"].astype(float)
-    if not prices.map(pd.notna).all() or (prices <= 0).any():
+    try:
+        prices = pd.to_numeric(data["close"], errors="raise").astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("close prices must be numeric") from exc
+    if not prices.map(isfinite).all() or (prices <= 0).any():
         raise ValueError("close prices must be finite and positive")
     target = signal.astype(bool).shift(1).fillna(False)
     position = target.astype(float) * strategy.position_sizing.max_position
