@@ -30,7 +30,7 @@ def _sleeve_returns(
     frame: pd.DataFrame,
     *,
     initial_cash: float,
-    fills: tuple,
+    fills: tuple[PaperFill, ...],
     end_timestamp: pd.Timestamp,
 ) -> pd.Series:
     """Mark sleeve equity from the portfolio's actual fills, costs, and run window."""
