@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import pandas as pd
 
@@ -36,13 +37,24 @@ def run_compiled_paper_strategy(
         raise ValueError("data cannot be empty")
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
-    entry, exit_ = compiled.signals(data)
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError("data index must be a DatetimeIndex")
+    if data.index.isna().any():
+        raise ValueError("data index cannot contain missing timestamps")
+    if not data.index.is_monotonic_increasing or data.index.has_duplicates:
+        raise ValueError("data index must be sorted and unique")
+    normalized = data.copy()
+    close = pd.to_numeric(normalized["close"], errors="coerce")
+    if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
+        raise ValueError("close prices must be finite and positive")
+    normalized["close"] = close
+    entry, exit_ = compiled.signals(normalized)
     broker = PaperBroker(config)
     risk = PaperRiskController(compiled.strategy.risk.max_drawdown)
     snapshots: list[PaperSnapshot] = []
     pending_action: str | None = None
 
-    for timestamp, row in data.iterrows():
+    for timestamp, row in normalized.iterrows():
         price = float(row["close"])
         current = broker.mark(timestamp, price)
         if not risk.check(current.equity):
@@ -83,8 +95,8 @@ def run_compiled_paper_strategy(
             pending_action = "sell"
 
     if snapshots and broker.position > 0 and not risk.state.halted:
-        timestamp = data.index[-1]
-        price = float(data.iloc[-1]["close"])
+        timestamp = normalized.index[-1]
+        price = float(normalized.iloc[-1]["close"])
         broker.execute(timestamp, "sell", broker.position, price)
         snapshots[-1] = broker.mark(timestamp, price)
 
