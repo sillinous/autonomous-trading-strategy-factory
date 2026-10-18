@@ -69,11 +69,12 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         close = pd.to_numeric(frame["close"], errors="coerce")
         if close.isna().any() or (~close.map(isfinite)).any() or (close <= 0).any():
             raise ValueError(f"data for {strategy_id} must contain finite positive close prices")
-        brokers[strategy_id] = PaperBroker(PaperConfig(
-            initial_cash=initial_cash * weights[strategy_id],
-            commission_bps=commission_bps,
-            slippage_bps=slippage_bps,
-        ))
+        if weights[strategy_id] > 0:
+            brokers[strategy_id] = PaperBroker(PaperConfig(
+                initial_cash=initial_cash * weights[strategy_id],
+                commission_bps=commission_bps,
+                slippage_bps=slippage_bps,
+            ))
         signals[strategy_id] = strategy_signals(frame, strategy)
 
     risk = PaperRiskController(max_drawdown)
