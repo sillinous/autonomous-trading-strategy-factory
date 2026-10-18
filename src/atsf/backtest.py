@@ -70,6 +70,8 @@ def run_long_signal_backtest(
         raise ValueError("combined transaction costs must be below 5000 bps")
     if signal.isna().any():
         raise ValueError("signal cannot contain missing values")
+    if not pd.api.types.is_bool_dtype(signal.dtype):
+        raise ValueError("signal values must be boolean")
 
     try:
         prices = pd.to_numeric(data["close"], errors="raise").astype(float)
