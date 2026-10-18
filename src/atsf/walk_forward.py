@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import pandas as pd
 
@@ -32,7 +33,19 @@ def walk_forward_validate(data: pd.DataFrame, candidate: StrategyCandidate, trai
     """Evaluate a fixed strategy on sequential OOS windows, including a final partial window."""
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive")
-    step = step or test_size
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError("walk-forward data index must be a DatetimeIndex")
+    if not data.index.is_monotonic_increasing or data.index.has_duplicates:
+        raise ValueError("walk-forward timestamps must be sorted and unique")
+    if "close" not in data.columns:
+        raise ValueError("walk-forward data must contain a close column")
+    try:
+        close = pd.to_numeric(data["close"], errors="raise")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("walk-forward close prices must be numeric") from exc
+    if close.isna().any() or not close.map(isfinite).all() or (close <= 0).any():
+        raise ValueError("walk-forward close prices must be finite and positive")
+    step = test_size if step is None else step
     if step <= 0:
         raise ValueError("step must be positive")
     if len(data) < train_size + test_size:
