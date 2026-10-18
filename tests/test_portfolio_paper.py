@@ -225,3 +225,15 @@ def test_portfolio_paper_runner_rejects_missing_indicator_source():
         run_paper_portfolio(
             data, {"a": strategy}, {"a": 1.0}, decisions={"a": approved()}
         )
+
+
+def test_portfolio_paper_runner_rejects_timezone_aware_timestamps():
+    index = pd.date_range("2025-01-01", periods=4, tz="UTC")
+    data = pd.DataFrame({"close": [100, 101, 102, 103]}, index=index)
+    with pytest.raises(ValueError, match="timezone-naive"):
+        run_paper_portfolio(
+            {"a": data},
+            {"a": make_strategy("a")},
+            {"a": 1.0},
+            decisions={"a": approved()},
+        )
