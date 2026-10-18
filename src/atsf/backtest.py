@@ -50,6 +50,10 @@ def run_long_signal_backtest(
         raise ValueError("data must contain a close column")
     if not isinstance(data.index, pd.DatetimeIndex):
         raise ValueError("backtest data index must be a DatetimeIndex")
+    if data.index.isna().any():
+        raise ValueError("backtest timestamps cannot contain missing values")
+    if data.index.tz is not None:
+        raise ValueError("backtest timestamps must be timezone-naive")
     if not data.index.is_monotonic_increasing or data.index.has_duplicates:
         raise ValueError("backtest timestamps must be sorted and unique")
     if not data.index.equals(signal.index):
