@@ -80,6 +80,8 @@ def test_executor_uses_persisted_members_and_saves_run():
     assert result.identity.dataset_version == dataset_version
     assert result.identity.execution_fingerprint
     assert result.paper.final_equity > 0
+    assert result.attribution.total_return == pytest.approx(result.paper.final_equity / 100_000.0 - 1.0, abs=1e-9)
+    assert sum(item.return_contribution for item in result.attribution.contributions) == pytest.approx(result.attribution.total_return, abs=1e-9)
     assert {item.strategy_id for item in result.attribution.contributions} == {first, second}
     stored = registry.get_portfolio_run(result.identity.run_id)
     assert stored is not None
