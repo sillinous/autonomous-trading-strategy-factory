@@ -69,3 +69,10 @@ def test_market_data_allows_zero_volume():
     data.loc[data.index[1], "volume"] = 0
     normalized = validate_market_data(data)
     assert normalized.loc[data.index[1], "volume"] == 0
+
+
+def test_market_data_rejects_missing_timestamp():
+    data = make_data()
+    data.index = pd.DatetimeIndex([data.index[0], pd.NaT, data.index[2]])
+    with pytest.raises(ValueError, match="cannot contain missing timestamps"):
+        validate_market_data(data)
