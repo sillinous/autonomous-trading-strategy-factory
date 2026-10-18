@@ -224,3 +224,18 @@ def test_backtest_rejects_noncanonical_timestamps(index, message):
     signal = pd.Series([False, True, False], index=index)
     with pytest.raises(ValueError, match=message):
         run_long_signal_backtest(data, signal, make_strategy())
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["False", "True", "False"],
+        [0, 1, 0],
+    ],
+)
+def test_backtest_rejects_non_boolean_signals(values):
+    index = pd.date_range("2026-03-01", periods=3)
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series(values, index=index)
+    with pytest.raises(ValueError, match="signal values must be boolean"):
+        run_long_signal_backtest(data, signal, make_strategy())
