@@ -28,15 +28,33 @@ class WalkForwardResult:
     reasons: tuple[str, ...]
 
 
-def walk_forward_validate(data: pd.DataFrame, candidate: StrategyCandidate, train_size: int, test_size: int, step: int | None = None, backtest_config: BacktestConfig | None = None, validation_policy: ValidationPolicy | None = None) -> WalkForwardResult:
-    """Evaluate a fixed strategy on sequential OOS windows, including a final partial window."""
+def walk_forward_validate(
+    data: pd.DataFrame,
+    candidate: StrategyCandidate,
+    train_size: int,
+    test_size: int,
+    step: int | None = None,
+    backtest_config: BacktestConfig | None = None,
+    validation_policy: ValidationPolicy | None = None,
+) -> WalkForwardResult:
+    """Evaluate a fixed strategy on chronological, sequential OOS windows.
+
+    The strategy is fixed rather than fitted on each training window. Training
+    rows provide indicator warm-up context only; only the subsequent test rows
+    contribute to each fold's reported backtest result.
+    """
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive")
-    step = step or test_size
+    step = test_size if step is None else step
     if step <= 0:
         raise ValueError("step must be positive")
+    if not data.index.is_unique:
+        raise ValueError("data index must contain unique timestamps")
+    if not data.index.is_monotonic_increasing:
+        raise ValueError("data index must be sorted in increasing chronological order")
     if len(data) < train_size + test_size:
         raise ValueError("insufficient data for one walk-forward fold")
+
     folds: list[WalkForwardFold] = []
     start = 0
     while start + train_size < len(data):
@@ -45,13 +63,28 @@ def walk_forward_validate(data: pd.DataFrame, candidate: StrategyCandidate, trai
         context = data.iloc[start:test_end]
         context_entry, _ = strategy_signals(context, candidate.strategy)
         test_data = data.iloc[train_end:test_end]
-        actual_test_size = len(test_data)
-        if actual_test_size == 0:
+        if test_data.empty:
             break
-        test_signal = context_entry.iloc[-actual_test_size:]
-        result = run_long_signal_backtest(test_data, test_signal, candidate.strategy, backtest_config)
+        test_signal = context_entry.iloc[-len(test_data):]
+        result = run_long_signal_backtest(
+            test_data, test_signal, candidate.strategy, backtest_config
+        )
         validation = validate_equity(result.equity, validation_policy)
-        folds.append(WalkForwardFold(data.index[start], data.index[train_end - 1], data.index[train_end], data.index[test_end - 1], result, validation))
+        folds.append(
+            WalkForwardFold(
+                data.index[start],
+                data.index[train_end - 1],
+                data.index[train_end],
+                data.index[test_end - 1],
+                result,
+                validation,
+            )
+        )
         start += step
-    failures = [f"fold {i} failed validation" for i, fold in enumerate(folds) if not fold.validation.passed]
+
+    failures = [
+        f"fold {i} failed validation"
+        for i, fold in enumerate(folds)
+        if not fold.validation.passed
+    ]
     return WalkForwardResult(candidate.candidate_id, tuple(folds), not failures, tuple(failures))
