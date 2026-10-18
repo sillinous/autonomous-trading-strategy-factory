@@ -54,6 +54,8 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         raise ValueError("all paper portfolio indexes must be DatetimeIndex")
     if any(index.isna().any() for index in indexes):
         raise ValueError("all paper portfolio indexes must not contain missing timestamps")
+    if any(index.tz is not None for index in indexes):
+        raise ValueError("all paper portfolio indexes must be timezone-naive")
     if any(not index.is_monotonic_increasing or index.has_duplicates for index in indexes):
         raise ValueError("all paper portfolio indexes must be sorted and unique")
     reference_index = indexes[0]
