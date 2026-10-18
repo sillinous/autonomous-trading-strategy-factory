@@ -250,3 +250,24 @@ def test_portfolio_paper_runner_rejects_live_stage_for_paper_execution():
             {"a": 1.0},
             decisions={"a": PromotionDecision(stage="live", eligible=True, reasons=())},
         )
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        PromotionDecision(stage="paper", eligible=True, reasons=("failed robustness",)),
+        PromotionDecision(stage="paper", eligible="false", reasons=()),
+        PromotionDecision(stage="paper", eligible=True, reasons=["bad-shape"]),
+        PromotionDecision(stage="paper", eligible=True, reasons=(False,)),
+    ],
+)
+def test_portfolio_paper_runner_rejects_malformed_eligible_decisions(decision):
+    index = pd.date_range("2025-01-01", periods=6)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102, 103, 104, 105]}, index=index)}
+    with pytest.raises(PermissionError, match="not eligible"):
+        run_paper_portfolio(
+            data,
+            {"a": make_strategy("a")},
+            {"a": 1.0},
+            decisions={"a": decision},
+        )
