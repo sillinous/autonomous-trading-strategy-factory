@@ -30,3 +30,30 @@ def test_attribution_rejects_invalid_inputs():
         attribute_portfolio(returns.assign(a=np.inf), {"a": 1.0})
     with pytest.raises(ValueError, match="gross exposure"):
         attribute_portfolio(returns, {"a": 1.1})
+
+
+@pytest.mark.parametrize("weights", [{"a": "0.5"}, {"a": True}, {"a": None}, {"a": float("nan")}])
+def test_attribution_rejects_non_numeric_or_non_finite_weights(weights):
+    returns = pd.DataFrame({"a": [0.01, -0.01]})
+    with pytest.raises(ValueError, match="weights must be finite non-negative numbers"):
+        attribute_portfolio(returns, weights)
+
+
+def test_attribution_single_observation_has_finite_zero_risk_contributions():
+    returns = pd.DataFrame({"a": [0.02], "b": [-0.01]})
+    result = attribute_portfolio(returns, {"a": 0.6, "b": 0.4})
+    assert result.volatility == 0.0
+    assert all(np.isfinite(item.risk_contribution) for item in result.contributions)
+    assert [item.risk_contribution for item in result.contributions] == [0.0, 0.0]
+
+
+def test_attribution_rejects_boolean_return_columns():
+    returns = pd.DataFrame({"a": [True, False]})
+    with pytest.raises(ValueError, match="numeric, non-boolean"):
+        attribute_portfolio(returns, {"a": 0.5})
+
+
+def test_attribution_rejects_duplicate_strategy_columns():
+    returns = pd.DataFrame([[0.01, 0.02], [0.03, 0.04]], columns=["a", "a"])
+    with pytest.raises(ValueError, match="columns must be unique"):
+        attribute_portfolio(returns, {"a": 1.0})
