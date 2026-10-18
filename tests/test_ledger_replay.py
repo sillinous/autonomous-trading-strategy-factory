@@ -56,3 +56,60 @@ def test_ledger_replay_rejects_non_flat_end_state() -> None:
             initial_cash=100.0,
             final_equity=100.0,
         )
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [True, "100.0", None, float("nan")],
+)
+def test_ledger_replay_rejects_invalid_cash_and_fee_configuration(bad_value):
+    with pytest.raises(ValueError):
+        validate_execution_ledger(
+            (),
+            initial_cash_by_strategy={"strategy-a": bad_value},
+            commission_bps=1.0,
+            initial_cash=100.0,
+            final_equity=100.0,
+        )
+
+
+def test_ledger_replay_rejects_duplicate_event_sequences():
+    buy = event(0, "buy", 1.0, 10.0, 0.01)
+    sell = PortfolioAuditEvent(0, "strategy-a", "sell", "2026-01-02T00:00:00", 1.0, 11.0, 0.011)
+    with pytest.raises(ValueError, match="sequence values must be unique"):
+        validate_execution_ledger(
+            (buy, sell),
+            initial_cash_by_strategy={"strategy-a": 100.0},
+            commission_bps=10.0,
+            initial_cash=100.0,
+            final_equity=100.979,
+        )
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    ["not-a-timestamp", "2026-01-01T00:00:00+00:00"],
+)
+def test_ledger_replay_rejects_malformed_or_timezone_aware_event_timestamps(timestamp):
+    malformed = PortfolioAuditEvent(0, "strategy-a", "buy", timestamp, 1.0, 10.0, 0.01)
+    with pytest.raises(ValueError):
+        validate_execution_ledger(
+            (malformed,),
+            initial_cash_by_strategy={"strategy-a": 100.0},
+            commission_bps=10.0,
+            initial_cash=100.0,
+            final_equity=100.0,
+        )
+
+
+def test_ledger_replay_rejects_non_increasing_event_sequences():
+    buy = PortfolioAuditEvent(2, "strategy-a", "buy", "2026-01-01T00:00:00", 1.0, 10.0, 0.01)
+    sell = PortfolioAuditEvent(1, "strategy-a", "sell", "2026-01-02T00:00:00", 1.0, 11.0, 0.011)
+    with pytest.raises(ValueError, match="strictly increasing"):
+        validate_execution_ledger(
+            (buy, sell),
+            initial_cash_by_strategy={"strategy-a": 100.0},
+            commission_bps=10.0,
+            initial_cash=100.0,
+            final_equity=100.979,
+        )
