@@ -34,16 +34,22 @@ def _sleeve_returns(frame: pd.DataFrame, strategy, *, initial_cash: float, commi
     broker = PaperBroker(PaperConfig(initial_cash=initial_cash, commission_bps=commission_bps, slippage_bps=slippage_bps))
     entry, exit_ = strategy_signals(frame, strategy)
     equity: list[float] = []
+    pending_action: str | None = None
     for timestamp in frame.index:
         price = float(close.loc[timestamp])
-        if bool(entry.loc[timestamp]) and broker.position == 0:
+        if pending_action == "buy" and broker.position == 0:
             desired = broker.cash * strategy.position_sizing.max_position / price
             quantity = min(desired, broker.max_affordable_quantity(price))
             if quantity > 0:
                 broker.execute(timestamp, "buy", quantity, price)
-        elif bool(exit_.loc[timestamp]) and broker.position > 0:
+        elif pending_action == "sell" and broker.position > 0:
             broker.execute(timestamp, "sell", broker.position, price)
+        pending_action = None
         equity.append(broker.mark(timestamp, price).equity)
+        if bool(entry.loc[timestamp]) and broker.position == 0:
+            pending_action = "buy"
+        elif bool(exit_.loc[timestamp]) and broker.position > 0:
+            pending_action = "sell"
     if broker.position > 0:
         timestamp = frame.index[-1]
         broker.execute(timestamp, "sell", broker.position, float(close.iloc[-1]))
