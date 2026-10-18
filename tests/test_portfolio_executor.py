@@ -263,3 +263,21 @@ def test_executor_rejects_inconsistent_promotion_evidence(stage, eligible, reaso
             dataset_version=dataset_version,
         )
     registry.close()
+
+
+
+@pytest.mark.parametrize("evidence", [["promotion"], "promotion", 7])
+def test_executor_rejects_non_object_evaluation_evidence(evidence):
+    registry = ExperimentRegistry()
+    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
+    experiment_id = registry.get_portfolio("portfolio-1")["definition"]["experiment_ids"][first]
+    registry.save_evaluation_evidence(experiment_id, evidence)
+
+    with pytest.raises(ValueError, match="missing or invalid promotion evidence"):
+        execute_persisted_portfolio(
+            registry,
+            "portfolio-1",
+            {first: make_data(), second: make_data()},
+            dataset_version=dataset_version,
+        )
+    registry.close()
