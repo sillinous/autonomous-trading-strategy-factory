@@ -183,3 +183,54 @@ def test_sleeve_attribution_uses_actual_fill_ledger_and_stops_at_run_end():
     expected_returns = expected_equity.pct_change().fillna(0.0)
     pd.testing.assert_series_equal(returns, expected_returns)
     assert index[3] not in returns.index
+
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("eligible", "false", "eligibility must be boolean"),
+        ("eligible", 0, "eligibility must be boolean"),
+        ("eligible", None, "eligibility must be boolean"),
+        ("stage", ["paper"], "invalid promotion stage"),
+        ("stage", "unrecognized", "invalid promotion stage"),
+        ("reasons", "none", "reasons must be a list of strings"),
+        ("reasons", [False], "reasons must be a list of strings"),
+    ],
+)
+def test_executor_rejects_malformed_persisted_promotion_evidence(field, value, message):
+    registry = ExperimentRegistry()
+    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
+    evidence = registry.get_evaluation_evidence(
+        registry.get_portfolio("portfolio-1")["definition"]["experiment_ids"][first]
+    )
+    evidence["promotion"][field] = value
+    registry.save_evaluation_evidence(
+        registry.get_portfolio("portfolio-1")["definition"]["experiment_ids"][first],
+        evidence,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        execute_persisted_portfolio(
+            registry,
+            "portfolio-1",
+            {first: make_data(), second: make_data()},
+            dataset_version=dataset_version,
+        )
+    registry.close()
+
+
+def test_executor_rejects_non_object_promotion_evidence():
+    registry = ExperimentRegistry()
+    first, second, dataset_version, _bundle_version = seed_persisted_portfolio(registry)
+    experiment_id = registry.get_portfolio("portfolio-1")["definition"]["experiment_ids"][first]
+    registry.save_evaluation_evidence(experiment_id, {"promotion": ["paper", True, []]})
+
+    with pytest.raises(ValueError, match="invalid promotion evidence"):
+        execute_persisted_portfolio(
+            registry,
+            "portfolio-1",
+            {first: make_data(), second: make_data()},
+            dataset_version=dataset_version,
+        )
+    registry.close()
