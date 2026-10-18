@@ -33,19 +33,18 @@ def build_fill_lineage(events: tuple[PortfolioAuditEvent, ...], signals: dict[st
         if event.strategy_id not in signals:
             raise ValueError(f"missing signals for strategy: {event.strategy_id}")
         entry, exit_ = signals[event.strategy_id]
-        is_entry = bool(entry.get(timestamp, False))
-        is_exit = bool(exit_.get(timestamp, False))
+        # Decisions are observed at the prior close; a fill cannot be
+        # authorized by a signal generated on its own fill timestamp.
+        prior_timestamps = entry.index[entry.index < timestamp]
+        decision_timestamp = prior_timestamps[-1] if len(prior_timestamps) else None
+        is_entry = decision_timestamp is not None and bool(entry.get(decision_timestamp, False))
+        is_exit = decision_timestamp is not None and bool(exit_.get(decision_timestamp, False))
         if halted and event.action == "sell":
             if halt_timestamp != timestamp:
                 raise ValueError(f"fill at {event.timestamp} for {event.strategy_id} has no deterministic authorizing decision")
             reason = "risk_halt"
         elif event.action == "buy" and is_entry:
             reason = "entry_signal"
-        elif event.action == "buy" and len(entry.index) > 0 and timestamp == entry.index[0]:
-            # Portfolio paper execution deliberately establishes each sleeve at the
-            # first market observation. This is a deterministic execution decision,
-            # distinct from a later strategy-generated entry signal.
-            reason = "initial_allocation"
         elif event.action == "sell" and is_exit:
             reason = "exit_signal"
         elif event.action == "sell" and not halted and timestamp == entry.index[-1]:

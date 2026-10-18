@@ -82,9 +82,9 @@ def test_portfolio_paper_runner_rejects_misaligned_timestamps():
 
 
 def test_portfolio_paper_runner_liquidates_on_risk_halt():
-    index = pd.date_range("2025-01-01", periods=5)
+    index = pd.date_range("2025-01-01", periods=6)
     data = {
-        "a": pd.DataFrame({"close": [100, 100, 100, 50, 50]}, index=index),
+        "a": pd.DataFrame({"close": [100, 100, 110, 120, 50, 50]}, index=index),
     }
     result = run_paper_portfolio(
         data,
@@ -99,3 +99,46 @@ def test_portfolio_paper_runner_liquidates_on_risk_halt():
     assert result.fills[-1][0] == "a"
     assert result.fills[-1][1].side == "sell"
     assert result.final_equity > 0
+
+
+def test_portfolio_signals_fill_at_next_close_and_not_on_first_bar():
+    index = pd.date_range("2025-01-01", periods=6)
+    data = {"a": pd.DataFrame({"close": [100, 100, 110, 120, 90, 90]}, index=index)}
+    result = run_paper_portfolio(
+        data, {"a": make_strategy("a")}, {"a": 1.0}, decisions={"a": approved()},
+        commission_bps=0, slippage_bps=0,
+    )
+    buys = [fill for _, fill in result.fills if fill.side == "buy"]
+    sells = [fill for _, fill in result.fills if fill.side == "sell"]
+    assert buys
+    assert buys[0].timestamp == index[3]  # Entry signal at index[2].
+    assert sells[0].timestamp == index[5]  # Exit signal at index[4] fills next close.
+
+
+def test_final_bar_entry_signal_does_not_create_same_window_fill():
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 100, 110]}, index=index)}
+    result = run_paper_portfolio(
+        data, {"a": make_strategy("a")}, {"a": 1.0}, decisions={"a": approved()},
+        commission_bps=0, slippage_bps=0,
+    )
+    assert result.fills == ()
+
+
+def test_zero_weight_sleeve_is_ignored_without_creating_zero_cash_broker():
+    index = pd.date_range("2025-01-01", periods=4)
+    data = {
+        "a": pd.DataFrame({"close": [100, 101, 102, 103]}, index=index),
+        "b": pd.DataFrame({"close": [100, 101, 102, 103]}, index=index),
+    }
+    result = run_paper_portfolio(
+        data,
+        {"a": make_strategy("a"), "b": make_strategy("b")},
+        {"a": 1.0, "b": 0.0},
+        decisions={"a": approved(), "b": approved()},
+        commission_bps=0,
+        slippage_bps=0,
+    )
+    assert result.snapshots
+    assert result.final_equity > 0
+    assert all(strategy_id == "a" for strategy_id, _ in result.fills)

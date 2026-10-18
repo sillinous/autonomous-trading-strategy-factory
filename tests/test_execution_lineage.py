@@ -19,24 +19,23 @@ def test_decision_id_is_deterministic():
 def test_fill_lineage_connects_signals_and_end_of_sample():
     index = pd.date_range("2026-01-01", periods=3, freq="D")
     events = (
-        PortfolioAuditEvent(0, "s1", "buy", index[0].isoformat(), 1.0, 100.0, 0.1),
-        PortfolioAuditEvent(1, "s1", "sell", index[1].isoformat(), 1.0, 101.0, 0.1),
-        PortfolioAuditEvent(2, "s1", "sell", index[2].isoformat(), 1.0, 102.0, 0.1),
+        PortfolioAuditEvent(0, "s1", "buy", index[1].isoformat(), 1.0, 100.0, 0.1),
+        PortfolioAuditEvent(1, "s1", "sell", index[2].isoformat(), 1.0, 101.0, 0.1),
     )
     lineage = build_fill_lineage(events, _signals(), halted=False)
-    assert [item.reason for item in lineage] == ["entry_signal", "exit_signal", "end_of_sample"]
+    assert [item.reason for item in lineage] == ["entry_signal", "exit_signal"]
     assert verify_fill_lineage(events, lineage, _signals(), halted=False)
 
 
 def test_risk_halt_lineage_uses_actual_liquidation_timestamp():
     index = pd.date_range("2026-01-01", periods=3, freq="D")
     events = (
-        PortfolioAuditEvent(0, "s1", "buy", index[0].isoformat(), 1.0, 100.0, 0.1),
-        PortfolioAuditEvent(1, "s1", "sell", index[1].isoformat(), 1.0, 101.0, 0.1),
+        PortfolioAuditEvent(0, "s1", "buy", index[1].isoformat(), 1.0, 100.0, 0.1),
+        PortfolioAuditEvent(1, "s1", "sell", index[2].isoformat(), 1.0, 101.0, 0.1),
     )
-    lineage = build_fill_lineage(events, _signals(), halted=True, liquidation_timestamp=index[1])
+    lineage = build_fill_lineage(events, _signals(), halted=True, liquidation_timestamp=index[2])
     assert [item.reason for item in lineage] == ["entry_signal", "risk_halt"]
-    assert verify_fill_lineage(events, lineage, _signals(), halted=True, liquidation_timestamp=index[1])
+    assert verify_fill_lineage(events, lineage, _signals(), halted=True, liquidation_timestamp=index[2])
 
 
 def test_risk_halt_without_matching_timestamp_fails_closed():
@@ -48,6 +47,20 @@ def test_risk_halt_without_matching_timestamp_fails_closed():
 
 def test_fill_without_authorizing_signal_fails_closed():
     index = pd.date_range("2026-01-01", periods=3, freq="D")
-    events = (PortfolioAuditEvent(0, "s1", "buy", index[1].isoformat(), 1.0, 100.0, 0.1),)
+    events = (PortfolioAuditEvent(0, "s1", "buy", index[0].isoformat(), 1.0, 100.0, 0.1),)
     with pytest.raises(ValueError, match="no deterministic authorizing decision"):
         build_fill_lineage(events, _signals(), halted=False)
+
+
+def test_fill_lineage_authorizes_end_of_sample_liquidation_from_prior_bar_state():
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    signals = {"s1": (
+        pd.Series([True, False, False], index=index),
+        pd.Series([False, False, False], index=index),
+    )}
+    events = (
+        PortfolioAuditEvent(0, "s1", "buy", index[1].isoformat(), 1.0, 100.0, 0.1),
+        PortfolioAuditEvent(1, "s1", "sell", index[2].isoformat(), 1.0, 102.0, 0.1),
+    )
+    lineage = build_fill_lineage(events, signals, halted=False)
+    assert [item.reason for item in lineage] == ["entry_signal", "end_of_sample"]
