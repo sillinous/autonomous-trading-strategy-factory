@@ -46,7 +46,16 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
     if max_drawdown is not None and not 0 < max_drawdown < 1:
         raise ValueError("max_drawdown must be between 0 and 1")
     for strategy_id, decision in decisions.items():
-        if not decision.eligible or decision.stage not in {"promoted", "paper", "live"}:
+        if (
+            not isinstance(decision, PromotionDecision)
+            or not isinstance(decision.eligible, bool)
+            or not isinstance(decision.stage, str)
+            or decision.stage not in {"promoted", "paper"}
+            or not isinstance(decision.reasons, tuple)
+            or any(not isinstance(reason, str) for reason in decision.reasons)
+            or not decision.eligible
+            or decision.reasons
+        ):
             raise PermissionError(f"strategy {strategy_id} is not eligible for paper execution")
 
     indexes = [frame.index for frame in data.values()]
