@@ -8,7 +8,7 @@ import pandas as pd
 from .dataset_bundle import bundle_identity
 from .execution_lineage import build_fill_lineage, verify_fill_lineage
 from .execution_manifest import execution_manifest
-from .paper import PaperBroker, PaperConfig
+from .paper import PaperFill
 from .portfolio_attribution import PortfolioAttribution
 from .portfolio_audit import PortfolioAuditEvent
 from .portfolio_paper import PortfolioPaperResult, run_paper_portfolio
