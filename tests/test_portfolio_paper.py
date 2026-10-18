@@ -196,3 +196,32 @@ def test_portfolio_paper_runner_normalizes_numeric_string_closes():
     )
     assert result.fills
     assert all(isinstance(fill.price, float) for _, fill in result.fills)
+
+
+def test_portfolio_paper_runner_rejects_non_finite_indicator_source():
+    index = pd.date_range("2025-01-01", periods=4)
+    data = {
+        "a": pd.DataFrame(
+            {"close": [100, 101, 102, 103], "volume": [10, 20, float("inf"), 40]},
+            index=index,
+        )
+    }
+    strategy = make_strategy("a").model_copy(
+        update={"indicators": [Indicator(name="sma", source="volume", period=2)]}
+    )
+    with pytest.raises(ValueError, match="signal source column.*finite numeric values"):
+        run_paper_portfolio(
+            data, {"a": strategy}, {"a": 1.0}, decisions={"a": approved()}
+        )
+
+
+def test_portfolio_paper_runner_rejects_missing_indicator_source():
+    index = pd.date_range("2025-01-01", periods=4)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102, 103]}, index=index)}
+    strategy = make_strategy("a").model_copy(
+        update={"indicators": [Indicator(name="sma", source="volume", period=2)]}
+    )
+    with pytest.raises(ValueError, match="missing signal source column.*volume"):
+        run_paper_portfolio(
+            data, {"a": strategy}, {"a": 1.0}, decisions={"a": approved()}
+        )

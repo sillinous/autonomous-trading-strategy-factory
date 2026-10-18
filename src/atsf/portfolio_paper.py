@@ -74,6 +74,25 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
             raise ValueError(f"data for {strategy_id} must contain finite positive close prices")
         normalized_frame = frame.copy()
         normalized_frame["close"] = close
+        indicator_names = {indicator.name for indicator in strategy.indicators}
+        source_columns = {indicator.source for indicator in strategy.indicators}
+        conditions = (
+            strategy.entry.all + strategy.entry.any
+            + strategy.exit.all + strategy.exit.any
+        )
+        for condition in conditions:
+            for operand in (condition.left, condition.right):
+                if isinstance(operand, str) and operand not in indicator_names:
+                    source_columns.add(operand)
+        for column in source_columns:
+            if column not in normalized_frame.columns:
+                raise ValueError(f"missing signal source column for {strategy_id}: {column}")
+            values = pd.to_numeric(normalized_frame[column], errors="coerce")
+            if values.isna().any() or (~values.map(isfinite)).any():
+                raise ValueError(
+                    f"signal source column for {strategy_id} must contain finite numeric values: {column}"
+                )
+            normalized_frame[column] = values
         normalized_data[strategy_id] = normalized_frame
         if weights[strategy_id] > 0:
             brokers[strategy_id] = PaperBroker(PaperConfig(
