@@ -92,7 +92,18 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
         evidence = store.get_evaluation_evidence(experiment_ids[strategy_id])
         if evidence is None or not isinstance(evidence.get("promotion"), dict): raise ValueError(f"missing promotion evidence for strategy: {strategy_id}")
         promotion = evidence["promotion"]
-        decisions[strategy_id] = PromotionDecision(stage=str(promotion["stage"]), eligible=bool(promotion["eligible"]), reasons=tuple(promotion.get("reasons", ())))
+        if not isinstance(promotion, dict):
+            raise ValueError(f"invalid promotion evidence for strategy: {strategy_id}")
+        stage = promotion.get("stage")
+        eligible = promotion.get("eligible")
+        reasons = promotion.get("reasons")
+        if not isinstance(stage, str) or stage not in {"research", "paper", "promoted", "live"}:
+            raise ValueError(f"invalid promotion stage for strategy: {strategy_id}")
+        if not isinstance(eligible, bool):
+            raise ValueError(f"promotion eligibility must be boolean for strategy: {strategy_id}")
+        if not isinstance(reasons, list) or any(not isinstance(reason, str) for reason in reasons):
+            raise ValueError(f"promotion reasons must be a list of strings for strategy: {strategy_id}")
+        decisions[strategy_id] = PromotionDecision(stage=stage, eligible=eligible, reasons=tuple(reasons))
         strategies[strategy_id] = strategy
     execution_config = {"initial_cash": float(initial_cash), "commission_bps": float(commission_bps), "slippage_bps": float(slippage_bps), "max_drawdown": max_drawdown}
     identity = build_portfolio_run_identity(portfolio_id, dataset_version, weights, execution_config=execution_config, data_fingerprint=bundle.version)
