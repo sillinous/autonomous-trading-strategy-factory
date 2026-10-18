@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import pandas as pd
 
@@ -36,13 +37,30 @@ def run_compiled_paper_strategy(
         raise ValueError("data cannot be empty")
     if "close" not in data.columns:
         raise ValueError("data must contain a close column")
-    entry, exit_ = compiled.signals(data)
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError("paper data index must be a DatetimeIndex")
+    if not data.index.is_monotonic_increasing:
+        raise ValueError("paper data index must be monotonically increasing")
+    if data.index.has_duplicates:
+        raise ValueError("paper data index must not contain duplicates")
+
+    normalized_data = data.copy()
+    try:
+        closes = pd.to_numeric(normalized_data["close"], errors="raise")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("paper close prices must be numeric") from exc
+    if closes.isna().any() or not closes.map(math.isfinite).all():
+        raise ValueError("paper close prices must be finite and non-missing")
+    if (closes <= 0).any():
+        raise ValueError("paper close prices must be strictly positive")
+    normalized_data["close"] = closes
+    entry, exit_ = compiled.signals(normalized_data)
     broker = PaperBroker(config)
     risk = PaperRiskController(compiled.strategy.risk.max_drawdown)
     snapshots: list[PaperSnapshot] = []
     pending_action: str | None = None
 
-    for timestamp, row in data.iterrows():
+    for timestamp, row in normalized_data.iterrows():
         price = float(row["close"])
         current = broker.mark(timestamp, price)
         if not risk.check(current.equity):
@@ -83,8 +101,8 @@ def run_compiled_paper_strategy(
             pending_action = "sell"
 
     if snapshots and broker.position > 0 and not risk.state.halted:
-        timestamp = data.index[-1]
-        price = float(data.iloc[-1]["close"])
+        timestamp = normalized_data.index[-1]
+        price = float(normalized_data.iloc[-1]["close"])
         broker.execute(timestamp, "sell", broker.position, price)
         snapshots[-1] = broker.mark(timestamp, price)
 
