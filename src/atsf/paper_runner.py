@@ -41,6 +41,8 @@ def run_compiled_paper_strategy(
         raise ValueError("data index must be a DatetimeIndex")
     if data.index.isna().any():
         raise ValueError("data index cannot contain missing timestamps")
+    if data.index.tz is not None:
+        raise ValueError("data index must be timezone-naive")
     if not data.index.is_monotonic_increasing or data.index.has_duplicates:
         raise ValueError("data index must be sorted and unique")
     normalized = data.copy()

@@ -210,3 +210,17 @@ def test_closed_trade_return_compounds_exact_net_equity_returns():
     assert result.trade_returns[1] == pytest.approx(
         (1 + result.returns.iloc[5:7]).prod() - 1
     )
+
+
+@pytest.mark.parametrize(
+    "index, message",
+    [
+        (pd.DatetimeIndex(["2026-01-01", None, "2026-01-03"]), "missing values"),
+        (pd.date_range("2026-01-01", periods=3, tz="UTC"), "timezone-naive"),
+    ],
+)
+def test_backtest_rejects_noncanonical_timestamps(index, message):
+    data = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)
+    signal = pd.Series([False, True, False], index=index)
+    with pytest.raises(ValueError, match=message):
+        run_long_signal_backtest(data, signal, make_strategy())
