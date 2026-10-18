@@ -97,7 +97,7 @@ def execute_persisted_portfolio(store: ExperimentRegistry, portfolio_id: str, da
         stage = promotion.get("stage")
         eligible = promotion.get("eligible")
         reasons = promotion.get("reasons")
-        if not isinstance(stage, str) or stage not in {"research", "paper", "promoted", "live"}:
+        if not isinstance(stage, str) or stage not in {"research", "paper"}:
             raise ValueError(f"invalid promotion stage for strategy: {strategy_id}")
         if not isinstance(eligible, bool):
             raise ValueError(f"promotion eligibility must be boolean for strategy: {strategy_id}")
