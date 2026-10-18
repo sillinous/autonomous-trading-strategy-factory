@@ -53,3 +53,19 @@ def test_csv_loader_normalizes_canonical_columns():
     loaded = load_csv(csv.encode())
     assert list(loaded.columns) == ["open", "high", "low", "close", "volume"]
     assert isinstance(loaded.index, pd.DatetimeIndex)
+
+
+@pytest.mark.parametrize("column", ["open", "high", "low", "close"])
+@pytest.mark.parametrize("invalid_price", [0, -1])
+def test_market_data_rejects_non_positive_ohlc_prices(column, invalid_price):
+    data = make_data()
+    data.loc[data.index[1], column] = invalid_price
+    with pytest.raises(ValueError, match="OHLC prices must be positive"):
+        validate_market_data(data)
+
+
+def test_market_data_allows_zero_volume():
+    data = make_data()
+    data.loc[data.index[1], "volume"] = 0
+    normalized = validate_market_data(data)
+    assert normalized.loc[data.index[1], "volume"] == 0
