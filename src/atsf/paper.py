@@ -73,7 +73,10 @@ class PaperBroker:
             or price <= 0
         ):
             raise ValueError("price must be a positive finite real number")
-        return PaperSnapshot(timestamp, self.cash, self.position, self.cash + self.position * price)
+        equity = self.cash + self.position * price
+        if not isfinite(equity):
+            raise ValueError("marked equity must remain finite")
+        return PaperSnapshot(timestamp, self.cash, self.position, equity)
 
     def max_affordable_quantity(self, reference_price: float) -> float:
         """Return a buy quantity safely below the cash boundary after costs."""
@@ -86,12 +89,16 @@ class PaperBroker:
             raise ValueError("price must be a positive finite real number")
         fill_price = reference_price * (1.0 + self.config.slippage_bps / 10_000.0)
         cost_per_unit = fill_price * (1.0 + self.config.commission_bps / 10_000.0)
+        if not isfinite(fill_price) or not isfinite(cost_per_unit) or cost_per_unit <= 0:
+            raise ValueError("affordability arithmetic must remain finite")
         quantity = self.cash / cost_per_unit
+        if not isfinite(quantity):
+            raise ValueError("affordable quantity must remain finite")
         # Avoid a one-ULP overrun when execute() recomputes the same arithmetic.
         return max(0.0, nextafter(quantity, 0.0))
 
     def execute(self, timestamp: pd.Timestamp, side: str, quantity: float, reference_price: float) -> PaperFill:
-        if side not in {"buy", "sell"}:
+        if not isinstance(side, str) or side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
         if (
             not isinstance(quantity, Real)
@@ -116,13 +123,22 @@ class PaperBroker:
                 raise ValueError("execution cost must remain finite")
             if required > self.cash + 1e-12:
                 raise ValueError("insufficient paper cash")
-            self.cash -= required
-            self.position += quantity
+            new_cash = self.cash - required
+            new_position = self.position + quantity
+            if not isfinite(new_cash) or not isfinite(new_position):
+                raise ValueError("post-trade cash and position must remain finite")
+            self.cash = new_cash
+            self.position = new_position
         else:
             if quantity > self.position + 1e-12:
                 raise ValueError("insufficient paper position")
-            self.cash += fill_price * quantity - fee
-            self.position = max(0.0, self.position - quantity)
+            proceeds = notional - fee
+            new_cash = self.cash + proceeds
+            new_position = max(0.0, self.position - quantity)
+            if not isfinite(proceeds) or not isfinite(new_cash) or not isfinite(new_position):
+                raise ValueError("post-trade cash and position must remain finite")
+            self.cash = new_cash
+            self.position = new_position
         fill = PaperFill(timestamp, side, quantity, fill_price, fee)
         self.fills.append(fill)
         return fill
