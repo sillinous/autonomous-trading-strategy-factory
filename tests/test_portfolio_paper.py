@@ -364,7 +364,7 @@ def test_portfolio_paper_runner_rejects_non_dictionary_inputs(field, bad_value):
         "decisions": decisions,
     }
     values[field] = bad_value
-    with pytest.raises(ValueError, match="must be a dictionary"):
+    with pytest.raises(ValueError, match="must be dictionaries"):
         run_paper_portfolio(**values)
 
 
