@@ -31,8 +31,18 @@ class PortfolioPaperResult:
 
 def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, StrategySpec], weights: dict[str, float], *, decisions: dict[str, PromotionDecision], initial_cash: float = 100_000.0, commission_bps: float = 1.0, slippage_bps: float = 2.0, max_drawdown: float | None = None) -> PortfolioPaperResult:
     """Run approved sleeves with close decisions filled at the next available close."""
+    if not isinstance(data, dict) or not isinstance(strategies, dict) or not isinstance(weights, dict):
+        raise ValueError("data, strategies, and weights must be dictionaries")
+    if not isinstance(decisions, dict):
+        raise ValueError("decisions must be a dictionary")
     if not strategies:
         raise ValueError("strategies cannot be empty")
+    if any(not isinstance(key, str) or not key.strip() for key in strategies):
+        raise ValueError("strategy IDs must be non-empty strings")
+    if any(not isinstance(frame, pd.DataFrame) for frame in data.values()):
+        raise ValueError("data values must be pandas DataFrames")
+    if any(not isinstance(strategy, StrategySpec) for strategy in strategies.values()):
+        raise ValueError("strategy values must be StrategySpec instances")
     if set(data) != set(strategies) or set(weights) != set(strategies):
         raise ValueError("data, strategies, and weights must contain the same strategy IDs")
     if set(decisions) != set(strategies):
