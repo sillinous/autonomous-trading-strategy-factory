@@ -34,3 +34,57 @@ def test_paper_broker_marks_equity():
 def test_paper_broker_rejects_extreme_combined_transaction_costs(commission_bps, slippage_bps):
     with pytest.raises(ValueError, match="combined transaction costs must be below 5000 bps"):
         PaperBroker(PaperConfig(commission_bps=commission_bps, slippage_bps=slippage_bps))
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        PaperConfig(initial_cash=True),
+        PaperConfig(initial_cash="1000"),
+        PaperConfig(initial_cash=float("inf")),
+        PaperConfig(commission_bps=True),
+        PaperConfig(commission_bps="1"),
+        PaperConfig(commission_bps=float("nan")),
+        PaperConfig(slippage_bps=True),
+        PaperConfig(slippage_bps="2"),
+        PaperConfig(slippage_bps=float("inf")),
+    ],
+)
+def test_paper_broker_rejects_malformed_configuration(config):
+    with pytest.raises(ValueError):
+        PaperBroker(config)
+
+
+def test_paper_broker_rejects_wrong_config_type():
+    with pytest.raises(ValueError, match="PaperConfig"):
+        PaperBroker(object())
+
+
+@pytest.mark.parametrize(
+    "quantity,price",
+    [
+        ("1", 100),
+        (True, 100),
+        (float("inf"), 100),
+        (1, "100"),
+        (1, False),
+        (1, float("nan")),
+    ],
+)
+def test_paper_broker_rejects_malformed_order_numbers(quantity, price):
+    broker = PaperBroker()
+    with pytest.raises(ValueError, match="quantity and price"):
+        broker.execute(pd.Timestamp("2025-01-01"), "buy", quantity, price)
+
+
+@pytest.mark.parametrize("price", ["100", True, float("nan"), float("inf"), 0])
+def test_paper_broker_rejects_malformed_mark_prices(price):
+    broker = PaperBroker()
+    with pytest.raises(ValueError, match="price"):
+        broker.mark(pd.Timestamp("2025-01-01"), price)
+
+
+def test_paper_broker_rejects_overflowing_execution_arithmetic():
+    broker = PaperBroker(PaperConfig(initial_cash=1e308, commission_bps=0, slippage_bps=0))
+    with pytest.raises(ValueError, match="finite"):
+        broker.execute(pd.Timestamp("2025-01-01"), "buy", 1e308, 1e308)
