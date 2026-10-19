@@ -46,3 +46,17 @@ def test_non_finite_equity_halt_is_latched():
     assert not controller.check(100_000)
     assert controller.state.halted
     assert controller.state.reason == "non-finite equity"
+
+
+@pytest.mark.parametrize("limit", [True, "0.1", float("nan"), float("inf"), 0, 1])
+def test_paper_risk_rejects_malformed_drawdown_limit(limit):
+    with pytest.raises(ValueError, match="finite real number"):
+        PaperRiskController(max_drawdown=limit)
+
+
+@pytest.mark.parametrize("equity", [True, "100", None, complex(100, 0)])
+def test_paper_risk_latches_halt_on_invalid_equity_type(equity):
+    controller = PaperRiskController()
+    assert not controller.check(equity)
+    assert controller.state.halted
+    assert controller.state.reason == "invalid equity type"

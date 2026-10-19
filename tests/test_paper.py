@@ -88,3 +88,35 @@ def test_paper_broker_rejects_overflowing_execution_arithmetic():
     broker = PaperBroker(PaperConfig(initial_cash=1e308, commission_bps=0, slippage_bps=0))
     with pytest.raises(ValueError, match="finite"):
         broker.execute(pd.Timestamp("2025-01-01"), "buy", 1e308, 1e308)
+
+
+def test_paper_broker_rejects_unhashable_side_without_type_error():
+    broker = PaperBroker()
+    with pytest.raises(ValueError, match="side"):
+        broker.execute(pd.Timestamp("2025-01-01"), [], 1, 100)
+
+
+def test_paper_broker_rejects_non_finite_marked_equity():
+    broker = PaperBroker(PaperConfig(initial_cash=1e308, commission_bps=0, slippage_bps=0))
+    broker.position = 1e308
+    with pytest.raises(ValueError, match="marked equity"):
+        broker.mark(pd.Timestamp("2025-01-01"), 1e308)
+
+
+def test_paper_broker_rejects_overflowing_post_trade_position_atomically():
+    broker = PaperBroker(PaperConfig(initial_cash=1e308, commission_bps=0, slippage_bps=0))
+    with pytest.raises(ValueError, match="post-trade"):
+        broker.execute(pd.Timestamp("2025-01-01"), "buy", 1e308, 0.5)
+    assert broker.cash == 1e308
+    assert broker.position == 0
+    assert broker.fills == []
+
+
+def test_paper_broker_rejects_overflowing_sell_cash_atomically():
+    broker = PaperBroker(PaperConfig(initial_cash=1e308, commission_bps=0, slippage_bps=0))
+    broker.position = 1e308
+    with pytest.raises(ValueError, match="post-trade"):
+        broker.execute(pd.Timestamp("2025-01-01"), "sell", 1e308, 1.0)
+    assert broker.cash == 1e308
+    assert broker.position == 1e308
+    assert broker.fills == []
