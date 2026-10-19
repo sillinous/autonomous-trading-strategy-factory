@@ -283,3 +283,60 @@ def test_portfolio_paper_runner_rejects_unhashable_stage_value():
             {"a": 1.0},
             decisions={"a": PromotionDecision(stage=["paper"], eligible=True, reasons=())},
         )
+
+
+@pytest.mark.parametrize("bad_initial_cash", [True, "100000", float("nan"), float("inf"), 0])
+def test_portfolio_paper_runner_rejects_invalid_initial_cash(bad_initial_cash):
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    with pytest.raises(ValueError, match="initial_cash"):
+        run_paper_portfolio(
+            data, {"a": make_strategy("a")}, {"a": 1.0},
+            decisions={"a": approved()}, initial_cash=bad_initial_cash,
+        )
+
+
+@pytest.mark.parametrize("bad_weight", [True, "0.5", float("nan"), float("inf"), -0.1])
+def test_portfolio_paper_runner_rejects_invalid_weight_types_and_values(bad_weight):
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    with pytest.raises(ValueError, match="weights"):
+        run_paper_portfolio(
+            data, {"a": make_strategy("a")}, {"a": bad_weight},
+            decisions={"a": approved()},
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("commission_bps", True),
+        ("commission_bps", "1.0"),
+        ("commission_bps", float("nan")),
+        ("commission_bps", -1.0),
+        ("slippage_bps", True),
+        ("slippage_bps", "2.0"),
+        ("slippage_bps", float("inf")),
+        ("slippage_bps", -1.0),
+    ],
+)
+def test_portfolio_paper_runner_rejects_invalid_execution_costs(field, bad_value):
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    kwargs = {field: bad_value}
+    with pytest.raises(ValueError, match=field):
+        run_paper_portfolio(
+            data, {"a": make_strategy("a")}, {"a": 1.0},
+            decisions={"a": approved()}, **kwargs,
+        )
+
+
+@pytest.mark.parametrize("bad_drawdown", [True, "0.1", float("nan"), float("inf"), 0, 1])
+def test_portfolio_paper_runner_rejects_invalid_drawdown_types_and_values(bad_drawdown):
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    with pytest.raises(ValueError, match="max_drawdown"):
+        run_paper_portfolio(
+            data, {"a": make_strategy("a")}, {"a": 1.0},
+            decisions={"a": approved()}, max_drawdown=bad_drawdown,
+        )
