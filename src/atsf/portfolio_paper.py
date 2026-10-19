@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from numbers import Real
 
 import pandas as pd
 
@@ -36,15 +37,40 @@ def run_paper_portfolio(data: dict[str, pd.DataFrame], strategies: dict[str, Str
         raise ValueError("data, strategies, and weights must contain the same strategy IDs")
     if set(decisions) != set(strategies):
         raise ValueError("paper eligibility decisions are required for every strategy")
-    if not isfinite(initial_cash) or initial_cash <= 0:
-        raise ValueError("initial_cash must be positive and finite")
-    if any(not isfinite(weight) or weight < 0 for weight in weights.values()):
-        raise ValueError("weights must be finite and non-negative")
+    if not isinstance(initial_cash, Real) or isinstance(initial_cash, bool) or not isfinite(initial_cash) or initial_cash <= 0:
+        raise ValueError("initial_cash must be a positive finite real number")
+    if (
+        not isinstance(commission_bps, Real)
+        or isinstance(commission_bps, bool)
+        or not isfinite(commission_bps)
+        or commission_bps < 0
+    ):
+        raise ValueError("commission_bps must be a finite non-negative real number")
+    if (
+        not isinstance(slippage_bps, Real)
+        or isinstance(slippage_bps, bool)
+        or not isfinite(slippage_bps)
+        or slippage_bps < 0
+    ):
+        raise ValueError("slippage_bps must be a finite non-negative real number")
+    if any(
+        not isinstance(weight, Real)
+        or isinstance(weight, bool)
+        or not isfinite(weight)
+        or weight < 0
+        for weight in weights.values()
+    ):
+        raise ValueError("weights must be finite non-negative real numbers")
     total_weight = sum(weights.values())
     if total_weight > 1.0 + 1e-12:
         raise ValueError("portfolio weights exceed 100% gross exposure")
-    if max_drawdown is not None and not 0 < max_drawdown < 1:
-        raise ValueError("max_drawdown must be between 0 and 1")
+    if max_drawdown is not None and (
+        not isinstance(max_drawdown, Real)
+        or isinstance(max_drawdown, bool)
+        or not isfinite(max_drawdown)
+        or not 0 < max_drawdown < 1
+    ):
+        raise ValueError("max_drawdown must be a finite real number between 0 and 1")
     for strategy_id, decision in decisions.items():
         if (
             not isinstance(decision, PromotionDecision)
