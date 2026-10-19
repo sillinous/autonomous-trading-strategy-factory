@@ -340,3 +340,63 @@ def test_portfolio_paper_runner_rejects_invalid_drawdown_types_and_values(bad_dr
             data, {"a": make_strategy("a")}, {"a": 1.0},
             decisions={"a": approved()}, max_drawdown=bad_drawdown,
         )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("data", None),
+        ("strategies", None),
+        ("weights", None),
+        ("decisions", None),
+    ],
+)
+def test_portfolio_paper_runner_rejects_non_dictionary_inputs(field, bad_value):
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    strategies = {"a": make_strategy("a")}
+    weights = {"a": 1.0}
+    decisions = {"a": approved()}
+    values = {
+        "data": data,
+        "strategies": strategies,
+        "weights": weights,
+        "decisions": decisions,
+    }
+    values[field] = bad_value
+    with pytest.raises(ValueError, match="must be a dictionary"):
+        run_paper_portfolio(**values)
+
+
+def test_portfolio_paper_runner_rejects_non_dataframe_market_data():
+    with pytest.raises(ValueError, match="DataFrames"):
+        run_paper_portfolio(
+            {"a": [100, 101, 102]},
+            {"a": make_strategy("a")},
+            {"a": 1.0},
+            decisions={"a": approved()},
+        )
+
+
+def test_portfolio_paper_runner_rejects_non_strategy_values():
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {"a": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    with pytest.raises(ValueError, match="StrategySpec"):
+        run_paper_portfolio(
+            data,
+            {"a": object()},
+            {"a": 1.0},
+            decisions={"a": approved()},
+        )
+
+
+def test_portfolio_paper_runner_rejects_blank_strategy_ids():
+    index = pd.date_range("2025-01-01", periods=3)
+    data = {" ": pd.DataFrame({"close": [100, 101, 102]}, index=index)}
+    with pytest.raises(ValueError, match="non-empty strings"):
+        run_paper_portfolio(
+            data,
+            {" ": make_strategy("blank")},
+            {" ": 1.0},
+            decisions={" ": approved()},
+        )
