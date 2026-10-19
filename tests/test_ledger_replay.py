@@ -50,7 +50,7 @@ def test_ledger_replay_rejects_fee_mismatch() -> None:
 def test_ledger_replay_rejects_non_flat_end_state() -> None:
     with pytest.raises(ValueError, match="does not end flat"):
         validate_execution_ledger(
-            (event(0, "buy", 1.0, 10.0, 0.01),),
+            (event(0, "buy", 1.0, 10.0, 0.001),),
             initial_cash_by_strategy={"strategy-a": 100.0},
             commission_bps=1.0,
             initial_cash=100.0,
